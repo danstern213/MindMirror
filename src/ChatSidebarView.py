@@ -13,11 +13,20 @@ from src.services.search_service import SearchService
 from src.embedding_helper import generate_embedding
 from src.generate_embeddings import generate_embeddings_for_directory
 
+def load_css():
+    """Load custom CSS styles."""
+    css_path = Path(__file__).parent / 'styles' / 'main.css'
+    with open(css_path) as f:
+        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+
 class ChatSidebarView:
     """Streamlit-based chat interface implementation."""
     
     def __init__(self):
         """Initialize the chat view."""
+        # Load custom CSS
+        load_css()
+        
         # Initialize settings with API key from secrets
         if 'settings' not in st.session_state:
             settings = DEFAULT_SETTINGS.copy()
@@ -87,12 +96,12 @@ class ChatSidebarView:
         )
         
         # Personal info
-        personal_info = st.sidebar.text_area(
-            "About you",
-            value=st.session_state.settings['personal_info']
-        )
-        if personal_info != st.session_state.settings['personal_info']:
-            st.session_state.settings['personal_info'] = personal_info
+        # personal_info = st.sidebar.text_area(
+        #     "About you",
+        #     value=st.session_state.settings['personal_info']
+        # )
+        # if personal_info != st.session_state.settings['personal_info']:
+        #     st.session_state.settings['personal_info'] = personal_info
 
     def _render_thread_list(self):
         """Render thread list in sidebar."""
@@ -113,18 +122,26 @@ class ChatSidebarView:
 
     def _render_chat_area(self):
         """Render main chat area."""
+        # Check if there is a current thread
         if not st.session_state.current_thread:
-            self._render_welcome_screen()
-            return
+            # Automatically create a new thread if none exists
+            self._create_new_thread()
         
         # Display messages
         for message in st.session_state.current_thread.messages:
+            # Display the message content
             with st.chat_message(message.role):
-                st.write(message.content)
+                st.markdown(message.content)
+            
+            # Display sources in an expander below the message
+            if message.role == "assistant" and message.sources:
+                with st.expander("🔍 View Sources", expanded=False):
+                    for result in message.sources:
+                        source_name = Path(result['id']).name
+                        st.write(f"- **{source_name}** (relevance: {result['score']:.2f})")
         
         # Input area
         if prompt := st.chat_input("Type your message..."):
-            # Use asyncio to handle the coroutine
             asyncio.run(self._handle_user_message(prompt))
 
     def _render_welcome_screen(self):
@@ -165,35 +182,34 @@ class ChatSidebarView:
             st.error("OpenAI API key not found in secrets.")
             return
         
+        # Add and display user message immediately
+        user_message = Message(
+            role="user",
+            content=content,
+            timestamp=datetime.now()
+        )
+        st.session_state.current_thread.messages.append(user_message)
+        
+        # Display the message
+        with st.chat_message("user"):
+            st.write(content)
+        
+        # Get AI response
+        search_results = await self.search_service.search(content)
+        context = self._generate_context(search_results)
+        
+        messages = [
+            {"role": "system", "content": st.session_state.settings['system_prompt']},
+            {"role": "system", "content": f"User's personal info: {st.session_state.settings['personal_info']}"},
+            {"role": "system", "content": f"Context from notes:\n{context}"},
+        ]
+        
+        # Add conversation history
+        for msg in st.session_state.current_thread.messages[:-1]:
+            messages.append({"role": msg.role, "content": msg.content})
+        messages.append({"role": "user", "content": content})
+        
         try:
-            # Add user message
-            user_message = Message(
-                role="user",
-                content=content,
-                timestamp=datetime.now()
-            )
-            st.session_state.current_thread.messages.append(user_message)
-            
-            # Perform semantic search
-            search_results = await self.search_service.search(content)
-            
-            # Generate context from search results
-            context = self._generate_context(search_results)
-            
-            # Prepare messages for OpenAI
-            messages = [
-                {"role": "system", "content": st.session_state.settings['system_prompt']},
-                {"role": "system", "content": f"User's personal info: {st.session_state.settings['personal_info']}"},
-                {"role": "system", "content": f"Context from notes:\n{context}"},
-            ]
-            
-            # Add conversation history
-            for msg in st.session_state.current_thread.messages[:-1]:  # Exclude the last message
-                messages.append({"role": msg.role, "content": msg.content})
-            
-            # Add the current user message
-            messages.append({"role": "user", "content": content})
-            
             # Get AI response
             client = OpenAI(api_key=api_key)
             response = client.chat.completions.create(
@@ -203,20 +219,33 @@ class ChatSidebarView:
                 max_tokens=1000,
                 top_p=1,
                 frequency_penalty=0,
-                presence_penalty=0
+                presence_penalty=0,
+                stream=True  # Enable streaming
             )
             
-            # Create assistant message
+            # Create placeholder for streaming response
+            message_placeholder = st.empty()
+            full_response = ""
+            
+            # Stream the response
+            with st.chat_message("assistant"):
+                for chunk in response:
+                    if chunk.choices[0].delta.content is not None:
+                        full_response += chunk.choices[0].delta.content
+                        message_placeholder.markdown(full_response + "▌")
+                message_placeholder.markdown(full_response)
+            
+            # Store response and sources in session state
             assistant_message = Message(
                 role="assistant",
-                content=response.choices[0].message.content,
-                timestamp=datetime.now()
+                content=full_response,
+                timestamp=datetime.now(),
+                sources=search_results  # Add sources to the message
             )
             st.session_state.current_thread.messages.append(assistant_message)
             
-            # Update thread
-            st.session_state.current_thread.last_updated = datetime.now()
-            if len(st.session_state.current_thread.messages) == 2:  # First exchange
+            # Update thread title if first exchange
+            if len(st.session_state.current_thread.messages) == 2:
                 st.session_state.current_thread.title = content[:30] + "..."
             
             st.rerun()

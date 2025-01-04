@@ -9,6 +9,7 @@ class Message:
     content: str
     timestamp: datetime
     metadata: Optional[Dict] = None
+    sources: Optional[List[dict]] = None
 
 @dataclass
 class ChatThread:
