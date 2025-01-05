@@ -90,7 +90,7 @@ class SearchService:
                         print(f"Error reading file {doc['id']}: {error}")
 
         print(f"\nFound {len(results)} results above threshold {similarity_threshold}")
-        return sorted(results, key=lambda x: x['score'], reverse=True)[:5]
+        return sorted(results, key=lambda x: x['score'], reverse=True)[:50] ### this is where we limit the results
 
     def extract_keywords(self, text: str) -> List[str]:
         """Extract meaningful keywords from text."""

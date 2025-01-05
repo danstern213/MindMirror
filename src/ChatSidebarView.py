@@ -19,6 +19,11 @@ def load_css():
     with open(css_path) as f:
         st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
 
+def count_indexed_files() -> int:
+    """Count the number of indexed files in the embeddings directory."""
+    embeddings_dir = Path("adil-clone/embeddings")
+    return len(list(embeddings_dir.glob("*.json")))
+
 class ChatSidebarView:
     """Streamlit-based chat interface implementation."""
     
@@ -40,6 +45,8 @@ class ChatSidebarView:
             st.session_state.current_thread = None
         if 'embeddings_processed' not in st.session_state:
             st.session_state.embeddings_processed = 0
+        if 'indexing_in_progress' not in st.session_state:
+            st.session_state.indexing_in_progress = False
             
         # Initialize search service
         self.search_service = SearchService(
@@ -50,36 +57,21 @@ class ChatSidebarView:
 
     def render(self):
         """Render the main chat interface."""
-        st.title("Sidekick Chat")
+        st.title("Big Brain Chat")
         
-        # Show embedding progress at the top
-        if st.session_state.embeddings_processed < 100:
-            progress_container = st.container()
-            with progress_container:
-                st.write("### Initializing Embeddings")
-                progress_bar = st.progress(0, "Processing embeddings...")
-                status_text = st.empty()
-                status_text.write(f"Processed {st.session_state.embeddings_processed}/100 files")
-                
-                def update_progress(processed: int):
-                    st.session_state.embeddings_processed = processed
-                    progress_bar.progress(processed/100)
-                    status_text.write(f"Processed {processed}/100 files")
-                
-                try:
-                    result = asyncio.run(generate_embeddings_for_directory(
-                        progress_callback=update_progress
-                    ))
-                    if result > 0:
-                        st.success(f"Successfully embedded {result} files!")
-                except Exception as e:
-                    st.error(f"Error generating embeddings: {str(e)}")
-                    print(f"Embedding error: {str(e)}")
+        # Create persistent containers for status messages
+        if 'status_container' not in st.session_state:
+            st.session_state.status_container = st.empty()
         
+        # Show indexed files count
+        indexed_count = count_indexed_files()
+        st.session_state.status_container.success(f"{indexed_count} files have already been successfully indexed.")
+
         # Rest of the UI
         with st.sidebar:
             self._render_settings()
             self._render_thread_list()
+            self._render_index_button()
         
         self._render_chat_area()
 
@@ -120,6 +112,33 @@ class ChatSidebarView:
             ):
                 st.session_state.current_thread = thread
 
+    def _render_index_button(self):
+        """Render the index button in the sidebar."""
+        st.sidebar.header("Index Data")
+        
+        # Show total indexed files count in sidebar
+        indexed_count = count_indexed_files()
+        st.sidebar.caption(f"Total files indexed: {indexed_count}")
+        
+        # Create a placeholder for the status in the main area
+        status_placeholder = st.empty()
+        
+        if st.sidebar.button("Index"):
+            with status_placeholder:
+                try:
+                    with st.spinner("Indexing files..."):
+                        # Run the indexing synchronously
+                        result = asyncio.run(generate_embeddings_for_directory(
+                            progress_callback=lambda x, total: st.write(f"Processing file {x} out of {total}...")
+                        ))
+                        
+                        if result > 0:
+                            st.success(f"Successfully indexed {result} new files!")
+                        else:
+                            st.info("No new files to index.")
+                except Exception as e:
+                    st.error(f"Error indexing files: {str(e)}")
+
     def _render_chat_area(self):
         """Render main chat area."""
         # Check if there is a current thread
@@ -144,24 +163,6 @@ class ChatSidebarView:
         if prompt := st.chat_input("Type your message..."):
             asyncio.run(self._handle_user_message(prompt))
 
-    def _render_welcome_screen(self):
-        """Render welcome screen when no thread is selected."""
-        st.markdown("""
-        ## Welcome to Sidekick! 👋
-        
-        Start a new conversation or select an existing one from the sidebar.
-        
-        ### Suggested prompts:
-        """)
-        
-        # Display suggested prompts as clickable buttons
-        cols = st.columns(2)
-        for i, prompt in enumerate(st.session_state.settings['suggested_prompts']):
-            if cols[i % 2].button(prompt, key=f"prompt_{i}"):
-                self._create_new_thread()
-                # Use asyncio to handle the coroutine
-                asyncio.run(self._handle_user_message(prompt))
-
     def _create_new_thread(self):
         """Create a new chat thread."""
         thread = ChatThread(
@@ -182,6 +183,9 @@ class ChatSidebarView:
             st.error("OpenAI API key not found in secrets.")
             return
         
+        # Create a status message placeholder
+        status_message = st.empty()
+        
         # Add and display user message immediately
         user_message = Message(
             role="user",
@@ -194,22 +198,31 @@ class ChatSidebarView:
         with st.chat_message("user"):
             st.write(content)
         
-        # Get AI response
-        search_results = await self.search_service.search(content)
-        context = self._generate_context(search_results)
-        
-        messages = [
-            {"role": "system", "content": st.session_state.settings['system_prompt']},
-            {"role": "system", "content": f"User's personal info: {st.session_state.settings['personal_info']}"},
-            {"role": "system", "content": f"Context from notes:\n{context}"},
-        ]
-        
-        # Add conversation history
-        for msg in st.session_state.current_thread.messages[:-1]:
-            messages.append({"role": msg.role, "content": msg.content})
-        messages.append({"role": "user", "content": content})
-        
         try:
+            # Show searching status
+            status_message.info("🔍 Searching through relevant documents...")
+            search_results = await self.search_service.search(content)
+            
+            # Show context generation status
+            status_message.info("📝 Generating context from search results...")
+            context = self._generate_context(search_results)
+            
+            # Show message preparation status
+            status_message.info("🤔 Preparing messages for AI response...")
+            messages = [
+                {"role": "system", "content": st.session_state.settings['system_prompt']},
+                {"role": "system", "content": f"User's personal info: {st.session_state.settings['personal_info']}"},
+                {"role": "system", "content": f"Context from notes:\n{context}"},
+            ]
+            
+            # Add conversation history
+            for msg in st.session_state.current_thread.messages[:-1]:
+                messages.append({"role": msg.role, "content": msg.content})
+            messages.append({"role": "user", "content": content})
+            
+            # Show AI thinking status
+            status_message.info("🧠 Generating AI response...")
+            
             # Get AI response
             client = OpenAI(api_key=api_key)
             response = client.chat.completions.create(
@@ -222,6 +235,9 @@ class ChatSidebarView:
                 presence_penalty=0,
                 stream=True  # Enable streaming
             )
+            
+            # Clear status message before showing response
+            status_message.empty()
             
             # Create placeholder for streaming response
             message_placeholder = st.empty()
@@ -250,7 +266,7 @@ class ChatSidebarView:
             
             st.rerun()
         except Exception as e:
-            st.error(f"Error processing message: {str(e)}")
+            status_message.error(f"Error processing message: {str(e)}")
 
     def _generate_context(self, search_results: List[dict]) -> str:
         """Generate context string from search results."""
@@ -314,7 +330,7 @@ class DummyMetadataCache:
 def main():
     """Main entry point for Streamlit app."""
     st.set_page_config(
-        page_title="Sidekick Chat",
+        page_title="My Big Brain Chat",
         layout="wide",
         initial_sidebar_state="expanded"
     )

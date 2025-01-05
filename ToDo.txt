@@ -1,6 +1,4 @@
-Enable a loading icon when the AI is thinking
-Enable streaming for the AI response
-Add the sources at the bottom.  Show the sources in a collapsible section
-Figure out how to save embeddings so that they load once and are indexed forever
 Add in better CSS
-Remove the boilerplate text on first run
+Figure out how to make sure the link traversals work in the search service
+    1.travers_links and process_linked_file doesnt work
+    2. calculate keyword score and extract keywords don't work either
