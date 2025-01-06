@@ -6,10 +6,11 @@ import uuid
 import json
 from pathlib import Path
 from openai import OpenAI
+import re
 
 from src.types import Message, ChatThread, ThreadStorage
 from src.settings import DEFAULT_SETTINGS, ChatSidebarSettings
-from src.services.search_service import SearchService
+from src.services.search_service import SearchService, SearchResult, VaultFile
 from src.embedding_helper import generate_embedding
 from src.generate_embeddings import generate_embeddings_for_directory
 
@@ -47,11 +48,15 @@ class ChatSidebarView:
             st.session_state.embeddings_processed = 0
         if 'indexing_in_progress' not in st.session_state:
             st.session_state.indexing_in_progress = False
+        
+        # Initialize vault and metadata cache
+        self.vault = DummyVault()
+        self.metadata_cache = DummyMetadataCache()
             
         # Initialize search service
         self.search_service = SearchService(
-            vault=DummyVault(),
-            metadata_cache=DummyMetadataCache(),
+            vault=self.vault,
+            metadata_cache=self.metadata_cache,
             api_key=st.session_state.settings['openai_api_key']
         )
 
@@ -151,13 +156,13 @@ class ChatSidebarView:
             # Display the message content
             with st.chat_message(message.role):
                 st.markdown(message.content)
-            
-            # Display sources in an expander below the message
-            if message.role == "assistant" and message.sources:
-                with st.expander("🔍 View Sources", expanded=False):
-                    for result in message.sources:
-                        source_name = Path(result['id']).name
-                        st.write(f"- **{source_name}** (relevance: {result['score']:.2f})")
+                
+                # Only show sources for completed assistant messages
+                if message.role == "assistant" and message.sources and message == st.session_state.current_thread.messages[-1]:
+                    with st.expander("🔍 View Sources", expanded=False):
+                        for result in message.sources:
+                            source_name = Path(result['id']).name
+                            st.write(f"- **{source_name}** (relevance: {result['score']:.2f})")
         
         # Input area
         if prompt := st.chat_input("Type your message..."):
@@ -199,9 +204,25 @@ class ChatSidebarView:
             st.write(content)
         
         try:
+            # First, analyze conversation continuity
+            conversation_analysis = await self.analyze_conversation_continuity(content, status_message)
+            
             # Show searching status
             status_message.info("🔍 Searching through relevant documents...")
-            search_results = await self.search_service.search(content)
+            
+            # Get explicitly referenced notes first
+            explicit_results = await self.get_explicitly_referenced_notes(content)
+            
+            # Then get semantic search results
+            semantic_results = await self.search_service.search(conversation_analysis['search_query'])
+            
+            # Merge results, prioritizing explicit references
+            search_results = [
+                *explicit_results,
+                *[result for result in semantic_results 
+                  if result['score'] > 0.75 and 
+                  not any(explicit['id'] == result['id'] for explicit in explicit_results)]
+            ]
             
             # Show context generation status
             status_message.info("📝 Generating context from search results...")
@@ -209,16 +230,39 @@ class ChatSidebarView:
             
             # Show message preparation status
             status_message.info("🤔 Preparing messages for AI response...")
-            messages = [
-                {"role": "system", "content": st.session_state.settings['system_prompt']},
-                {"role": "system", "content": f"User's personal info: {st.session_state.settings['personal_info']}"},
-                {"role": "system", "content": f"Context from notes:\n{context}"},
-            ]
             
-            # Add conversation history
-            for msg in st.session_state.current_thread.messages[:-1]:
-                messages.append({"role": msg.role, "content": msg.content})
-            messages.append({"role": "user", "content": content})
+            # Create system prompt with conversation analysis
+            system_prompt = f"""{st.session_state.settings['system_prompt']}
+
+MEMORY CONTEXT:
+{st.session_state.settings.get('memory', '')}
+
+ABOUT THE USER:
+{st.session_state.settings['personal_info']}
+
+Conversation Analysis:
+{"This is a follow-up question to the previous topic. Consider the previous context while maintaining focus on new information." if conversation_analysis['is_follow_up'] else "This is a new topic. Focus on providing fresh information without being constrained by the previous conversation."}
+
+Current conversation context:
+{chr(10).join(f"{msg.role}: {msg.content}" for msg in st.session_state.current_thread.messages[-3:])}
+
+I am providing you with both relevant sections and their surrounding context from the user's notes. Each note is marked with its relevance score (higher is better).
+
+Remember to:
+1. {"Build upon the previous conversation while incorporating new information from the notes" if conversation_analysis['is_follow_up'] else "Focus on the new topic without being constrained by the previous conversation"}
+2. Look for new connections in the provided notes
+3. When referencing notes, always use the double bracket format: [[note name]]
+
+Here are the relevant notes:
+
+{context}"""
+
+            messages = [
+                {"role": "system", "content": system_prompt},
+                *[{"role": msg.role, "content": msg.content} 
+                  for msg in st.session_state.current_thread.messages[:-1]],
+                {"role": "user", "content": content}
+            ]
             
             # Show AI thinking status
             status_message.info("🧠 Generating AI response...")
@@ -233,7 +277,7 @@ class ChatSidebarView:
                 top_p=1,
                 frequency_penalty=0,
                 presence_penalty=0,
-                stream=True  # Enable streaming
+                stream=True
             )
             
             # Clear status message before showing response
@@ -245,39 +289,169 @@ class ChatSidebarView:
             
             # Stream the response
             with st.chat_message("assistant"):
-                for chunk in response:
-                    if chunk.choices[0].delta.content is not None:
-                        full_response += chunk.choices[0].delta.content
-                        message_placeholder.markdown(full_response + "▌")
-                message_placeholder.markdown(full_response)
-            
-            # Store response and sources in session state
-            assistant_message = Message(
-                role="assistant",
-                content=full_response,
-                timestamp=datetime.now(),
-                sources=search_results  # Add sources to the message
-            )
-            st.session_state.current_thread.messages.append(assistant_message)
-            
-            # Update thread title if first exchange
-            if len(st.session_state.current_thread.messages) == 2:
-                st.session_state.current_thread.title = content[:30] + "..."
-            
-            st.rerun()
+                try:
+                    # Create a container for the message and sources
+                    message_container = st.container()
+                    
+                    # Stream the response in the message container
+                    with message_container:
+                        message_placeholder = st.empty()
+                        for chunk in response:
+                            if chunk.choices[0].delta.content is not None:
+                                full_response += chunk.choices[0].delta.content
+                                message_placeholder.markdown(full_response + "▌")
+                        message_placeholder.markdown(full_response)
+                        
+                        # Only show sources after response is complete
+                        if search_results:
+                            with st.expander("🔍 View Sources", expanded=False):
+                                for result in search_results:
+                                    source_name = Path(result['id']).name
+                                    st.write(f"- **{source_name}** (relevance: {result['score']:.2f})")
+                    
+                    # Store response and sources in session state
+                    assistant_message = Message(
+                        role="assistant",
+                        content=full_response,
+                        timestamp=datetime.now(),
+                        sources=search_results
+                    )
+                    st.session_state.current_thread.messages.append(assistant_message)
+                    
+                    # Update thread title if first exchange
+                    if len(st.session_state.current_thread.messages) == 2:
+                        st.session_state.current_thread.title = content[:30] + "..."
+                    
+                    # Add a small delay to ensure UI updates
+                    await asyncio.sleep(0.1)
+                finally:
+                    # Only rerun after everything is complete
+                    st.rerun()
         except Exception as e:
             status_message.error(f"Error processing message: {str(e)}")
 
+    async def get_explicitly_referenced_notes(self, message: str) -> List[SearchResult]:
+        """Extract and process explicitly referenced notes from the message."""
+        link_regex = r'\[\[(.*?)\]\]'
+        matches = re.finditer(link_regex, message)
+        results = []
+
+        for match in matches:
+            path = match.group(1)
+            file = self.vault.get_abstract_file_by_path(path)
+            
+            if file:
+                try:
+                    content = await self.vault.read(file)
+                    results.append({
+                        'id': file.path,
+                        'score': 1.0,  # Maximum relevance for explicit references
+                        'content': content,
+                        'explicit': True,
+                        'matched_keywords': [],
+                        'linked_contexts': []
+                    })
+                except Exception as error:
+                    print(f"Error reading file {path}: {error}")
+
+        return results
+
+    async def analyze_conversation_continuity(self, message: str, status_message) -> dict:
+        """Analyze if the new message is a follow-up to previous conversation."""
+        # If no previous conversation, it's not a follow-up
+        if len(st.session_state.current_thread.messages) < 2:
+            return {
+                'is_follow_up': False,
+                'search_query': message,
+                'context': message
+            }
+
+        # Get last exchange
+        messages = st.session_state.current_thread.messages
+        last_user_message = next(msg for msg in reversed(messages[:-1]) if msg.role == 'user')
+        last_assistant_message = next(msg for msg in reversed(messages[:-1]) if msg.role == 'assistant')
+
+        try:
+            status_message.info('Analyzing conversation context...')
+            
+            client = OpenAI(api_key=st.secrets.get('OPENAI_API_KEY'))
+            response = await client.chat.completions.create(
+                model="gpt-4-0125-preview",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """Analyze the conversation continuity between messages. Determine if the new message is:
+                        1. A follow-up/clarification of the previous topic
+                        2. A new, unrelated topic
+                        
+                        Respond in JSON format:
+                        {
+                            "isFollowUp": boolean,
+                            "explanation": string,
+                            "searchQuery": string (if follow-up, combine relevant context from previous exchange with new query; if new topic, use just the new message)
+                        }"""
+                    },
+                    {"role": "user", "content": last_user_message.content},
+                    {"role": "assistant", "content": last_assistant_message.content},
+                    {"role": "user", "content": message}
+                ],
+                temperature=0.1
+            )
+
+            analysis = json.loads(response.choices[0].message.content)
+            
+            return {
+                'is_follow_up': analysis['isFollowUp'],
+                'search_query': analysis['searchQuery'],
+                'context': f"{last_user_message.content}\n{last_assistant_message.content}\n{message}" if analysis['isFollowUp'] else message
+            }
+        except Exception as error:
+            print(f"Error analyzing conversation continuity: {error}")
+            return {
+                'is_follow_up': False,
+                'search_query': message,
+                'context': message
+            }
+
     def _generate_context(self, search_results: List[dict]) -> str:
-        """Generate context string from search results."""
-        print("\nGenerating context from search results:")
+        """Generate formatted context from search results."""
+        referenced_notes = set()
         context_parts = []
-        for result in search_results:
-            print(f"- Including content from {result['id']} (score: {result['score']})")
-            context_parts.append(f"From [[{result['id']}]]:\n{result['content']}\n")
         
-        context = "\n".join(context_parts)
-        print(f"\nGenerated context length: {len(context)} characters")
+        for result in search_results:
+            referenced_notes.add(result['id'])
+            
+            # Determine relevance indicator
+            relevance_indicator = "Explicitly Referenced" if result.get('explicit') else \
+                "Highly Relevant" if result['score'] > 0.9 else "Relevant"
+            
+            # Build context text
+            context_text = f"[File: {result['id']}] ({relevance_indicator}"
+            if not result.get('explicit'):
+                context_text += f", score: {result['score']:.3f}"
+            if result.get('keyword_score'):
+                context_text += f", keyword relevance: {result['keyword_score']:.3f}"
+            if result.get('matched_keywords'):
+                context_text += f", matched terms: {', '.join(result['matched_keywords'])}"
+            context_text += f")\n\nRelevant Section:\n{result['content']}"
+
+            # Add linked contexts if available
+            if result.get('linked_contexts'):
+                context_text += "\n\nRelevant content from linked notes:\n"
+                for linked in result['linked_contexts']:
+                    referenced_notes.add(linked.note_path)
+                    context_text += f"\nFrom [[{linked.note_path}]] (relevance: {linked.relevance:.3f}, link distance: {linked.link_distance}):\n{linked.context}\n"
+
+            context_parts.append(context_text)
+
+        # Join all parts with separator
+        context = "\n\n==========\n\n".join(context_parts)
+
+        # Add footer with referenced notes
+        if referenced_notes:
+            context += "\n\n---\nBased on the following context:\n"
+            context += "\n".join(f"- [[{path}]]" for path in sorted(referenced_notes))
+
         return context
 
     def save_threads(self):

@@ -7,6 +7,20 @@ from pathlib import Path
 from src.embedding_helper import generate_embedding
 from src.storage_service import get_all_embeddings
 
+# Add stub classes for Obsidian types if needed
+class VaultFile:
+    """Stub class for Obsidian's TFile."""
+    def __init__(self, path: str):
+        self.path = path
+        self.basename = path.split('/')[-1]
+
+class MetadataCache:
+    """Stub class for Obsidian's MetadataCache."""
+    def get_file_cache(self, file: VaultFile) -> Optional[dict]:
+        """Get metadata cache for a file."""
+        # In real implementation, this would return file metadata
+        return {'links': []}
+
 @dataclass
 class LinkedContext:
     note_path: str
@@ -69,7 +83,7 @@ class SearchService:
         # Generate query embedding
         query_embedding = generate_embedding(query, self.api_key)
         results: List[SearchResult] = []
-        similarity_threshold = 0.75
+        similarity_threshold = 0.775
 
         for doc in embeddings:
             score = self.cosine_similarity(query_embedding, doc['embedding'])
@@ -106,17 +120,27 @@ class SearchService:
         return [word for word in words if word not in stop_words]
 
     def calculate_keyword_score(self, content: str, keywords: List[str]) -> float:
-        """Calculate keyword-based relevance score."""
+        """Calculate keyword-based relevance score.
+        
+        Args:
+            content: The text content to analyze.
+            keywords: List of keywords to search for.
+            
+        Returns:
+            Normalized score based on keyword matches.
+        """
         import re
         score = 0
         content_lower = content.lower()
         
         for keyword in keywords:
+            # Use word boundaries to match whole words only
             pattern = fr'\b{re.escape(keyword)}\b'
             matches = re.findall(pattern, content_lower)
             if matches:
                 score += len(matches)
 
+        # Normalize score by content length (per 100 characters)
         return score / (len(content) / 100)
 
     def extract_relevant_section(self, content: str) -> str:
@@ -153,7 +177,14 @@ class SearchService:
         return sorted(final_results, key=lambda x: x['score'], reverse=True)
 
     async def traverse_links(self, result: SearchResult) -> List[LinkedContext]:
-        """Process linked notes to find relevant contexts."""
+        """Process linked notes to find relevant contexts.
+        
+        Args:
+            result: The search result to process links for.
+            
+        Returns:
+            List of LinkedContext objects for related documents.
+        """
         linked_contexts: List[LinkedContext] = []
         processed_files = set()
         
@@ -195,17 +226,21 @@ class SearchService:
 
         return linked_contexts
 
-    async def process_linked_file(
-        self,
-        file: 'VaultFile',
-        parent_score: float
-    ) -> Optional[LinkedContext]:
-        """Process a linked file to extract relevant context."""
+    async def process_linked_file(self, file: VaultFile, parent_score: float) -> Optional[LinkedContext]:
+        """Process a linked file to extract relevant context.
+        
+        Args:
+            file: The linked file to process.
+            parent_score: The relevance score of the parent document.
+            
+        Returns:
+            LinkedContext object if successful, None if error occurs.
+        """
         try:
             content = await self.vault.read(file)
             return LinkedContext(
                 note_path=file.path,
-                relevance=parent_score * 0.8,
+                relevance=parent_score * 0.8,  # Decay factor of 0.8 for linked documents
                 context=self.extract_relevant_section(content),
                 link_distance=1
             )
