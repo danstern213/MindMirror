@@ -1,4 +1,3 @@
 Add in better CSS
-Figure out how to make sure the link traversals work in the search service
-    1.travers_links and process_linked_file doesnt work
-    2. calculate keyword score and extract keywords don't work either
+Figure out why the response is getting cut off
+Make the keyword search much better when searching for or wanting to use very specific files

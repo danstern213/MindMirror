@@ -35,7 +35,7 @@ async def process_file(file_path: Path) -> Embedding:
         return None
 
 async def generate_embeddings_for_directory(
-    directory: str = "data_7_7_24",
+    directory: str = "data_1_7_25",
     progress_callback = None
 ) -> int:
     """Generate embeddings for files in directory, skipping already processed files."""
