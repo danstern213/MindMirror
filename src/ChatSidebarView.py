@@ -273,7 +273,7 @@ Here are the relevant notes:
                 model=st.session_state.settings['model'],
                 messages=messages,
                 temperature=0.7,
-                max_tokens=1000,
+                max_tokens=4000,
                 top_p=1,
                 frequency_penalty=0,
                 presence_penalty=0,
@@ -296,18 +296,15 @@ Here are the relevant notes:
                     # Stream the response in the message container
                     with message_container:
                         message_placeholder = st.empty()
+                        chunk_count = 0
                         for chunk in response:
                             if chunk.choices[0].delta.content is not None:
                                 full_response += chunk.choices[0].delta.content
                                 message_placeholder.markdown(full_response + "▌")
+                                chunk_count += 1
+                        # Final render of the complete response without cursor
+                        print(f"Response complete. Total chunks: {chunk_count}, Response length: {len(full_response)}")
                         message_placeholder.markdown(full_response)
-                        
-                        # Only show sources after response is complete
-                        if search_results:
-                            with st.expander("🔍 View Sources", expanded=False):
-                                for result in search_results:
-                                    source_name = Path(result['id']).name
-                                    st.write(f"- **{source_name}** (relevance: {result['score']:.2f})")
                     
                     # Store response and sources in session state
                     assistant_message = Message(
@@ -322,9 +319,17 @@ Here are the relevant notes:
                     if len(st.session_state.current_thread.messages) == 2:
                         st.session_state.current_thread.title = content[:30] + "..."
                     
-                    # Add a small delay to ensure UI updates
-                    await asyncio.sleep(0.1)
+                    # Add a longer delay to ensure UI updates
+                    await asyncio.sleep(0.5)
+                    
+                    # Only show sources after response is complete and rendered
+                    if search_results:
+                        with st.expander("🔍 View Sources", expanded=False):
+                            for result in search_results:
+                                source_name = Path(result['id']).name
+                                st.write(f"- **{source_name}** (relevance: {result['score']:.2f})")
                 finally:
+                    print("Triggering rerun...")
                     # Only rerun after everything is complete
                     st.rerun()
         except Exception as e:
