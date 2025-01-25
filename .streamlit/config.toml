@@ -5,3 +5,10 @@ backgroundColor = "#2a2a2a"             # Ink-like, neutral backdrop
 secondaryBackgroundColor = "#3a3a3a"    # Contrasting darker panels
 textColor = "#f5f2ec"                   # Light cream text
 font = "serif"
+
+[server]
+enableCORS = true
+enableXsrfProtection = true
+
+[browser]
+serverAddress = "localhost"

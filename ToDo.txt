@@ -1,3 +1,6 @@
-Add in better CSS
-Figure out why the response is getting cut off
-Make the keyword search much better when searching for or wanting to use very specific files
+File Uploader
+File Storage to store the files themselves
+Separate storage for embeddings
+Embed new files when they are uploaded
+User Authentication
+OpenAI API Key authentication

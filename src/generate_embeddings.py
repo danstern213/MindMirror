@@ -1,79 +1,60 @@
-import os
-from pathlib import Path
-import asyncio
-from typing import List
+from supabase import create_client, Client
 import streamlit as st
-import json
-
 from src.embedding_helper import generate_embedding
-from src.storage_service import save_embedding, Embedding
+from typing import List
 
-async def process_file(file_path: Path) -> Embedding:
-    """Process a single file and generate its embedding."""
-    try:
-        # Read file content
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        print(f"Processing file: {file_path}")
-        
-        # Generate embedding
-        embedding = generate_embedding(
-            content,
-            st.secrets.get('OPENAI_API_KEY')
+class EmbeddingService:
+    def __init__(self):
+        self.supabase: Client = create_client(
+            st.secrets["SUPABASE_URL"],
+            st.secrets["SUPABASE_KEY"]
         )
-        
-        print(f"Successfully embedded: {file_path}")
-        
-        return {
-            'id': str(file_path),
-            'embedding': embedding,
-            'last_modified': file_path.stat().st_mtime
-        }
-    except Exception as e:
-        print(f"Error processing {file_path}: {e}")
-        return None
 
-async def generate_embeddings_for_directory(
-    directory: str = "data_1_7_25",
-    progress_callback = None
-) -> int:
-    """Generate embeddings for files in directory, skipping already processed files."""
-    data_dir = Path(directory).resolve()
-    print(f"\nLooking for files in: {data_dir}")
-    
-    if not data_dir.exists():
-        raise ValueError(f"Directory not found: {data_dir}")
+    def chunk_text(self, text: str, chunk_size: int = 2000, overlap: int = 200) -> List[str]:
+        """Split text into overlapping chunks to maintain context."""
+        chunks = []
+        start = 0
+        while start < len(text):
+            end = start + chunk_size
+            # Find a good break point
+            if end < len(text):
+                # Try to break at paragraph or sentence
+                for separator in ['\n\n', '\n', '. ']:
+                    pos = text[start:end].rfind(separator)
+                    if pos != -1:
+                        end = start + pos + len(separator)
+                        break
+            chunk = text[start:end]
+            chunks.append(chunk)
+            start = end - overlap  # Create overlap with previous chunk
+        return chunks
 
-    # Get files
-    files = [
-        f for f in data_dir.rglob("*")
-        if f.is_file() and f.suffix.lower() in ['.txt', '.md', '.json', '.csv']
-    ] # if needed to debug, limit to 120 files ; [:120]
-    
-    total_files = len(files)
-    processed = 0
-    
-    for file in files:
-        # Call progress callback immediately with total files count
-        if progress_callback:
-            progress_callback(processed, total_files)
-            
-        # Check if embedding exists
-        embedding_file = Path(f"adil-clone/embeddings/{file.stem}.json")
-        if embedding_file.exists():
-            print(f"Skipping {file} as it is already processed.")
-            continue
+    def generate_and_save_embedding(self, text: str, file_id: str):
+        """Generate embeddings for text chunks and save to Supabase."""
+        try:
+            # Split text into chunks and generate embeddings
+            chunks = self.chunk_text(text)
+            print(f"\nProcessing {len(chunks)} chunks for file {file_id}")
 
-        print(f"\nStarting file {processed + 1}/{total_files}: {file}")
-        embedding = await process_file(file)
-        if embedding:
-            await save_embedding(embedding)
-            processed += 1
-            print(f"Successfully saved embedding for: {file}")
-    
-    # Call progress callback one final time
-    if progress_callback:
-        progress_callback(processed, total_files)
-    
-    return processed 
+            # Save embeddings for each chunk
+            for i, chunk in enumerate(chunks):
+                try:
+                    embedding = generate_embedding(chunk)
+                    response = self.supabase.table('embeddings').insert({
+                        'file_id': file_id,
+                        'embedding': embedding,
+                        'text': chunk,
+                        'chunk_index': i
+                    }).execute()
+
+                    if hasattr(response, 'error') and response.error:
+                        print(f"Error saving chunk {i}: {response.error}")
+                    else:
+                        print(f"Successfully saved chunk {i} for file {file_id}")
+                except Exception as chunk_error:
+                    print(f"Error processing chunk {i}: {chunk_error}")
+
+        except Exception as e:
+            print(f"An error occurred while generating or saving embeddings: {str(e)}")
+            import traceback
+            traceback.print_exc() 

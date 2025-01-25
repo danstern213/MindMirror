@@ -7,32 +7,44 @@ import json
 from pathlib import Path
 from openai import OpenAI
 import re
+from supabase import create_client, Client
 
 from src.types import Message, ChatThread, ThreadStorage
 from src.settings import DEFAULT_SETTINGS, ChatSidebarSettings
 from src.services.search_service import SearchService, SearchResult, VaultFile
 from src.embedding_helper import generate_embedding
-from src.generate_embeddings import generate_embeddings_for_directory
-
-def load_css():
-    """Load custom CSS styles."""
-    css_path = Path(__file__).parent / 'styles' / 'main.css'
-    with open(css_path) as f:
-        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+from src.generate_embeddings import EmbeddingService
+from src.services.upload_service import UploadService
 
 def count_indexed_files() -> int:
-    """Count the number of indexed files in the embeddings directory."""
-    embeddings_dir = Path("adil-clone/embeddings")
-    return len(list(embeddings_dir.glob("*.json")))
+    """Count the number of unique files that have embeddings in Supabase."""
+    supabase: Client = create_client(
+        st.secrets["SUPABASE_URL"],
+        st.secrets["SUPABASE_KEY"]
+    )
+    
+    try:
+        # Get count of distinct file_ids from embeddings
+        response = supabase.table('embeddings')\
+            .select('file_id', count='exact')\
+            .execute()
+            
+        if hasattr(response, 'error') and response.error:
+            print(f"Error counting files: {response.error}")
+            return 0
+            
+        # Count unique file_ids
+        unique_files = len(set(item['file_id'] for item in response.data))
+        return unique_files
+    except Exception as e:
+        print(f"Error counting indexed files: {e}")
+        return 0
 
 class ChatSidebarView:
     """Streamlit-based chat interface implementation."""
     
     def __init__(self):
         """Initialize the chat view."""
-        # Load custom CSS
-        load_css()
-        
         # Initialize settings with API key from secrets
         if 'settings' not in st.session_state:
             settings = DEFAULT_SETTINGS.copy()
@@ -60,23 +72,25 @@ class ChatSidebarView:
             api_key=st.session_state.settings['openai_api_key']
         )
 
+        self.upload_service = UploadService()
+        self.embedding_service = EmbeddingService()
+
     def render(self):
         """Render the main chat interface."""
         st.title("Big Brain Chat")
         
-        # Create persistent containers for status messages
-        if 'status_container' not in st.session_state:
-            st.session_state.status_container = st.empty()
-        
-        # Show indexed files count
+        # Show count of indexed files
         indexed_count = count_indexed_files()
-        st.session_state.status_container.success(f"{indexed_count} files have already been successfully indexed.")
+        if indexed_count > 0:
+            st.success(f"{indexed_count} {'file has' if indexed_count == 1 else 'files have'} been indexed and are ready for search.")
+        else:
+            st.info("Upload files to begin searching through your documents.")
 
         # Rest of the UI
         with st.sidebar:
             self._render_settings()
             self._render_thread_list()
-            self._render_index_button()
+            self._render_upload_section()
         
         self._render_chat_area()
 
@@ -91,14 +105,7 @@ class ChatSidebarView:
             type="password",
             disabled=True  # Make it read-only since it's from secrets
         )
-        
-        # Personal info
-        # personal_info = st.sidebar.text_area(
-        #     "About you",
-        #     value=st.session_state.settings['personal_info']
-        # )
-        # if personal_info != st.session_state.settings['personal_info']:
-        #     st.session_state.settings['personal_info'] = personal_info
+    
 
     def _render_thread_list(self):
         """Render thread list in sidebar."""
@@ -117,32 +124,59 @@ class ChatSidebarView:
             ):
                 st.session_state.current_thread = thread
 
-    def _render_index_button(self):
-        """Render the index button in the sidebar."""
-        st.sidebar.header("Index Data")
+    def _render_upload_section(self):
+        """Render the file upload section with status."""
+        st.sidebar.header("Document Management")
         
-        # Show total indexed files count in sidebar
+        # Show indexed file count
         indexed_count = count_indexed_files()
-        st.sidebar.caption(f"Total files indexed: {indexed_count}")
+        st.sidebar.metric("Indexed Documents", indexed_count)
         
-        # Create a placeholder for the status in the main area
-        status_placeholder = st.empty()
+        # File uploader
+        uploaded_files = st.sidebar.file_uploader(
+            "Upload Files",
+            accept_multiple_files=True,
+            help="Files will be automatically indexed after upload"
+        )
         
-        if st.sidebar.button("Index"):
-            with status_placeholder:
-                try:
-                    with st.spinner("Indexing files..."):
-                        # Run the indexing synchronously
-                        result = asyncio.run(generate_embeddings_for_directory(
-                            progress_callback=lambda x, total: st.write(f"Processing file {x} out of {total}...")
-                        ))
-                        
-                        if result > 0:
-                            st.success(f"Successfully indexed {result} new files!")
-                        else:
-                            st.info("No new files to index.")
-                except Exception as e:
-                    st.error(f"Error indexing files: {str(e)}")
+        # Create a container for upload status
+        status_container = st.sidebar.empty()
+        
+        if uploaded_files:
+            for uploaded_file in uploaded_files:
+                # Show processing status
+                status_container.info(f"Processing {uploaded_file.name}...")
+                
+                # Get number of chunks before processing
+                content = uploaded_file.read()
+                chunks = self.embedding_service.chunk_text(content.decode('utf-8'))
+                total_chunks = len(chunks)
+                
+                # Reset file pointer
+                uploaded_file.seek(0)
+                
+                # Create progress bar
+                progress_bar = st.sidebar.progress(0)
+                progress_text = st.sidebar.empty()
+                
+                # Save and index file
+                self.upload_service.save_file_to_supabase(uploaded_file)
+                
+                # Update progress for each chunk
+                for i in range(total_chunks):
+                    progress = (i + 1) / total_chunks
+                    progress_bar.progress(progress)
+                    progress_text.text(f"Saving chunk {i + 1} of {total_chunks}")
+                
+                # Clear progress indicators
+                progress_bar.empty()
+                progress_text.empty()
+                
+                # Show success message
+                status_container.success(f"Completed processing {uploaded_file.name}")
+                
+            # Clear status after all files are processed
+            status_container.empty()
 
     def _render_chat_area(self):
         """Render main chat area."""
@@ -161,8 +195,7 @@ class ChatSidebarView:
                 if message.role == "assistant" and message.sources and message == st.session_state.current_thread.messages[-1]:
                     with st.expander("🔍 View Sources", expanded=False):
                         for result in message.sources:
-                            source_name = Path(result['id']).name
-                            st.write(f"- **{source_name}** (relevance: {result['score']:.2f})")
+                            st.write(f"- **{result['title']}** (relevance: {result['score']:.2f})")
         
         # Input area
         if prompt := st.chat_input("Type your message..."):
@@ -258,12 +291,27 @@ Here are the relevant notes:
 {context}"""
 
             messages = [
-                {"role": "system", "content": system_prompt},
-                *[{"role": msg.role, "content": msg.content} 
-                  for msg in st.session_state.current_thread.messages[:-1]],
-                {"role": "user", "content": content}
+                {
+                    "role": "system",
+                    "content": """You are a helpful AI assistant. When referencing documents, use their titles in double square brackets like this: [[Title]].
+                    Available documents and their IDs:
+                    {}
+                    """.format('\n'.join([f"- {result['id']}: {result['title']}" for result in search_results]))
+                },
+                {
+                    "role": "user",
+                    "content": f"Context from relevant documents:\n{context}\n\nUser question: {content}"
+                }
             ]
             
+            # Add any conversation history if it's a follow-up
+            if conversation_analysis['is_follow_up']:
+                # Insert previous messages before the new ones
+                messages[1:1] = [
+                    {"role": msg.role, "content": msg.content}
+                    for msg in st.session_state.current_thread.messages[-1:]  # Last 2 messages
+                ]
+
             # Show AI thinking status
             status_message.info("🧠 Generating AI response...")
             
@@ -326,8 +374,7 @@ Here are the relevant notes:
                     if search_results:
                         with st.expander("🔍 View Sources", expanded=False):
                             for result in search_results:
-                                source_name = Path(result['id']).name
-                                st.write(f"- **{source_name}** (relevance: {result['score']:.2f})")
+                                st.write(f"- **{result['title']}** (relevance: {result['score']:.2f})")
                 finally:
                     print("Triggering rerun...")
                     # Only rerun after everything is complete
@@ -509,11 +556,14 @@ class DummyMetadataCache:
 def main():
     """Main entry point for Streamlit app."""
     st.set_page_config(
-        page_title="My Big Brain Chat",
+        page_title="Big Brain Chat",
+        page_icon="🧠",
         layout="wide",
-        initial_sidebar_state="expanded"
+        initial_sidebar_state="expanded",
+        menu_items={
+            'About': 'Big Brain Chat Application'
+        }
     )
-    
     view = ChatSidebarView()
     view.render()
 
