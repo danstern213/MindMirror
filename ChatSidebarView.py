@@ -10,12 +10,12 @@ from openai import OpenAI
 import re
 from supabase import create_client, Client
 
-from .types import Message, ChatThread, ThreadStorage
-from .settings import DEFAULT_SETTINGS, ChatSidebarSettings
-from .services.search_service import SearchService, SearchResult, VaultFile
-from .embedding_helper import generate_embedding
-from .generate_embeddings import EmbeddingService
-from .services.upload_service import UploadService
+from src.types import Message, ChatThread, ThreadStorage
+from src.settings import DEFAULT_SETTINGS, ChatSidebarSettings
+from src.services.search_service import SearchService, SearchResult, VaultFile
+from src.embedding_helper import generate_embedding
+from src.generate_embeddings import EmbeddingService
+from src.services.upload_service import UploadService
 
 def count_indexed_files() -> int:
     """Count the number of unique files that have embeddings in Supabase."""
