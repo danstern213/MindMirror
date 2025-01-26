@@ -13,7 +13,7 @@ from supabase import create_client, Client
 from src.types import Message, ChatThread, ThreadStorage
 from src.settings import DEFAULT_SETTINGS, ChatSidebarSettings
 from src.services.search_service import SearchService, SearchResult, VaultFile
-from src.embedding_helper import generate_embedding
+from src.embedding_helper import generate_embedding, initialize_openai
 from src.generate_embeddings import EmbeddingService
 from src.services.upload_service import UploadService
 
@@ -102,16 +102,20 @@ class ChatSidebarView:
         # API Key input with default from secrets but allowing override
         api_key = st.sidebar.text_input(
             "OpenAI API Key",
-            value=st.secrets.get('OPENAI_API_KEY', ''),
+            value=st.session_state.settings['openai_api_key'],
             type="password",
-            disabled=False  # Make it editable
+            disabled=False
         )
         
-        # Store the API key in session state (not persistent)
+        # Update API key in session state and services if changed
         if api_key != st.session_state.settings['openai_api_key']:
             st.session_state.settings['openai_api_key'] = api_key
             # Update the search service with new key
             self.search_service.api_key = api_key
+            # Initialize OpenAI client with new key
+            initialize_openai(api_key)
+            # Force a rerun to ensure all components update
+            st.rerun()
 
     def _render_thread_list(self):
         """Render thread list in sidebar."""
@@ -199,9 +203,10 @@ class ChatSidebarView:
 
     async def _handle_user_message(self, content: str):
         """Handle incoming user message."""
-        api_key = st.secrets.get('OPENAI_API_KEY')
+        # Get API key from session state first, then fall back to secrets
+        api_key = st.session_state.settings.get('openai_api_key') or st.secrets.get('OPENAI_API_KEY')
         if not api_key:
-            st.error("OpenAI API key not found in secrets.")
+            st.error("OpenAI API key not found. Please enter your API key in the settings.")
             return
         
         # Create a status message placeholder
@@ -298,7 +303,7 @@ Here are the relevant notes:
             # Show AI thinking status
             status_message.info("🧠 Generating AI response...")
             
-            # Get AI response
+            # Get AI response using the API key from session state
             client = OpenAI(api_key=api_key)
             response = client.chat.completions.create(
                 model=st.session_state.settings['model'],

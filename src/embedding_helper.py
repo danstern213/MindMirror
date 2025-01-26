@@ -9,11 +9,17 @@ client: Union[OpenAI, None] = None
 def initialize_openai(api_key: str = None) -> None:
     """Initialize the OpenAI client."""
     global client
+    
+    # First check session state
+    if not api_key and 'settings' in st.session_state:
+        api_key = st.session_state.settings.get('openai_api_key')
+    
+    # Then fall back to secrets
     if not api_key:
         api_key = st.secrets.get('OPENAI_API_KEY')
     
     if not api_key:
-        raise ValueError('OpenAI API key not found in secrets or provided')
+        raise ValueError('OpenAI API key not found in session state or secrets')
     
     client = OpenAI(api_key=api_key)
     print('OpenAI client initialized successfully')
@@ -24,17 +30,20 @@ def generate_embedding(text: str, api_key: str = None) -> List[float]:
     
     Args:
         text: The input text to embed
-        api_key: Optional API key (will use secrets if not provided)
+        api_key: Optional API key (will use session state or secrets if not provided)
     
     Returns:
         List[float]: The embedding vector
     """
     global client
     if not api_key:
-        api_key = st.secrets.get('OPENAI_API_KEY')
+        # Try to get API key from session state first, then secrets
+        api_key = st.session_state.settings.get('openai_api_key') if 'settings' in st.session_state else None
+        if not api_key:
+            api_key = st.secrets.get('OPENAI_API_KEY')
     
     if not api_key:
-        raise ValueError('OpenAI API key not found in secrets or provided')
+        raise ValueError('OpenAI API key not found in session state or secrets')
 
     # Reinitialize if API key changed or client not initialized
     if not client or client.api_key != api_key:

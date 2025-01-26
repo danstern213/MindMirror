@@ -28,11 +28,28 @@ class SearchService:
         """Keep the original constructor as other parts of the app expect it"""
         self.vault = vault
         self.metadata_cache = metadata_cache
-        self.api_key = api_key or st.secrets.get('OPENAI_API_KEY')
+        # Get API key from session state first, then parameter, then secrets
+        self.api_key = (
+            st.session_state.settings.get('openai_api_key') if 'settings' in st.session_state
+            else api_key or st.secrets.get('OPENAI_API_KEY')
+        )
         self.supabase: Client = create_client(
             st.secrets["SUPABASE_URL"],
             st.secrets["SUPABASE_KEY"]
         )
+    
+    @property
+    def api_key(self) -> str:
+        """Get the current API key, checking session state first."""
+        return (
+            st.session_state.settings.get('openai_api_key') if 'settings' in st.session_state
+            else self._api_key or st.secrets.get('OPENAI_API_KEY')
+        )
+    
+    @api_key.setter
+    def api_key(self, value: str):
+        """Set the API key."""
+        self._api_key = value
     
     def cosine_similarity(self, vec_a: List[float], vec_b: List[float]) -> float:
         """Calculate cosine similarity between two vectors."""

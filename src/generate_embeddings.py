@@ -32,6 +32,9 @@ class EmbeddingService:
     def generate_and_save_embedding(self, text: str, file_id: str):
         """Generate embeddings for text chunks and save to Supabase."""
         try:
+            # Get API key from session state
+            api_key = st.session_state.settings.get('openai_api_key') if 'settings' in st.session_state else None
+            
             # Split text into chunks and generate embeddings
             chunks = self.chunk_text(text)
             print(f"\nProcessing {len(chunks)} chunks for file {file_id}")
@@ -39,7 +42,7 @@ class EmbeddingService:
             # Save embeddings for each chunk
             for i, chunk in enumerate(chunks):
                 try:
-                    embedding = generate_embedding(chunk)
+                    embedding = generate_embedding(chunk, api_key)
                     response = self.supabase.table('embeddings').insert({
                         'file_id': file_id,
                         'embedding': embedding,
