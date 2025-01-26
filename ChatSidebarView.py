@@ -138,6 +138,10 @@ class ChatSidebarView:
         """Render the file upload section with status."""
         st.sidebar.header("Document Management")
         
+        # Initialize upload counter if not exists
+        if 'upload_counter' not in st.session_state:
+            st.session_state.upload_counter = 0
+        
         # Persistent metrics at top
         indexed_count = count_indexed_files()
         st.sidebar.metric("Indexed Documents", indexed_count)
@@ -145,11 +149,12 @@ class ChatSidebarView:
         # Status container for processing messages
         status_container = st.sidebar.empty()
         
-        # File uploader in fixed position
+        # File uploader with dynamic key
         uploaded_files = st.sidebar.file_uploader(
             "Upload Files",
             accept_multiple_files=True,
-            help="Files will be automatically indexed after upload"
+            help="Files will be automatically indexed after upload",
+            key=f"file_uploader_{st.session_state.upload_counter}"
         )
         
         # Process files when uploaded
@@ -162,8 +167,8 @@ class ChatSidebarView:
             
             status_container.success(f"✅ Processed {total_files} files")
             
-            st.experimental_rerun()
-            
+            # Increment the counter to reset the uploader
+            st.session_state.upload_counter += 1
 
     def _render_chat_area(self):
         """Render main chat area."""
