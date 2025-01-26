@@ -3,6 +3,7 @@ import streamlit as st
 from typing import List, Optional, Callable
 from datetime import datetime
 import uuid
+import time
 import json
 from pathlib import Path
 from openai import OpenAI
@@ -98,14 +99,19 @@ class ChatSidebarView:
         """Render settings in the sidebar."""
         st.sidebar.header("Settings")
         
-        # API Key input (showing stored key from secrets)
+        # API Key input with default from secrets but allowing override
         api_key = st.sidebar.text_input(
             "OpenAI API Key",
             value=st.secrets.get('OPENAI_API_KEY', ''),
             type="password",
-            disabled=True  # Make it read-only since it's from secrets
+            disabled=False  # Make it editable
         )
-    
+        
+        # Store the API key in session state (not persistent)
+        if api_key != st.session_state.settings['openai_api_key']:
+            st.session_state.settings['openai_api_key'] = api_key
+            # Update the search service with new key
+            self.search_service.api_key = api_key
 
     def _render_thread_list(self):
         """Render thread list in sidebar."""
@@ -139,44 +145,21 @@ class ChatSidebarView:
             help="Files will be automatically indexed after upload"
         )
         
-        # Create a container for upload status
-        status_container = st.sidebar.empty()
-        
         if uploaded_files:
-            for uploaded_file in uploaded_files:
-                # Show processing status
-                status_container.info(f"Processing {uploaded_file.name}...")
+            # Create single status container
+            status_container = st.sidebar.empty()
+            
+            total_files = len(uploaded_files)
+            
+            for i, uploaded_file in enumerate(uploaded_files, 1):
+                # Update progress message showing current file and total progress
+                status_container.info(f"Processing file {i} of {total_files}: {uploaded_file.name}")
                 
-                # Get number of chunks before processing
-                content = uploaded_file.read()
-                chunks = self.embedding_service.chunk_text(content.decode('utf-8'))
-                total_chunks = len(chunks)
-                
-                # Reset file pointer
-                uploaded_file.seek(0)
-                
-                # Create progress bar
-                progress_bar = st.sidebar.progress(0)
-                progress_text = st.sidebar.empty()
-                
-                # Save and index file
+                # Let upload_service handle the file and show its own progress
                 self.upload_service.save_file_to_supabase(uploaded_file)
-                
-                # Update progress for each chunk
-                for i in range(total_chunks):
-                    progress = (i + 1) / total_chunks
-                    progress_bar.progress(progress)
-                    progress_text.text(f"Saving chunk {i + 1} of {total_chunks}")
-                
-                # Clear progress indicators
-                progress_bar.empty()
-                progress_text.empty()
-                
-                # Show success message
-                status_container.success(f"Completed processing {uploaded_file.name}")
-                
-            # Clear status after all files are processed
-            status_container.empty()
+            
+            # Show completion message briefly before clearing
+            status_container.success(f"✅ Processed {total_files} files")
 
     def _render_chat_area(self):
         """Render main chat area."""
@@ -427,7 +410,7 @@ Here are the relevant notes:
             status_message.info('Analyzing conversation context...')
             
             client = OpenAI(api_key=st.secrets.get('OPENAI_API_KEY'))
-            response = await client.chat.completions.create(
+            response = client.chat.completions.create(
                 model="gpt-4-0125-preview",
                 messages=[
                     {

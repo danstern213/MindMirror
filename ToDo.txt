@@ -1,6 +1,3 @@
-File Uploader
-File Storage to store the files themselves
-Separate storage for embeddings
-Embed new files when they are uploaded
-User Authentication
+
+User Authentication so that only the user can access their own files
 OpenAI API Key authentication

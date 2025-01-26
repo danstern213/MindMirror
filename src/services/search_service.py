@@ -83,12 +83,7 @@ class SearchService:
             ]
             print(f"Found {len(embeddings)} embeddings")
 
-            # Add debug info
-            if response.data:
-                print("\nDebug - First document:")
-                print(f"Title: {response.data[0]['files']['title']}")
-                print(f"Text length: {len(response.data[0]['text'])}")
-                print(f"First 100 chars: {response.data[0]['text'][100:]}")
+            
         except Exception as e:
             print(f"Error fetching embeddings from Supabase: {e}")
             print(f"First embedding format: {type(response.data[0]['embedding']) if response.data else 'No data'}")
