@@ -169,6 +169,8 @@ class ChatSidebarView:
             
             # Increment the counter to reset the uploader
             st.session_state.upload_counter += 1
+            # Clear the uploaded files to reset the uploader
+            uploaded_files = None
 
     def _render_chat_area(self):
         """Render main chat area."""
