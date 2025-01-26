@@ -167,10 +167,14 @@ class ChatSidebarView:
             
             status_container.success(f"✅ Processed {total_files} files")
             
-            # Increment the counter to reset the uploader
-            st.session_state.upload_counter += 1
-            # Clear the uploaded files to reset the uploader
-            uploaded_files = None
+            # Show reset button
+            if st.sidebar.button("Reset and Upload More Files"):
+                # Increment the counter to reset the uploader
+                st.session_state.upload_counter += 1
+                # Clear the status messages
+                status_container.empty()
+                # Rerun to refresh the uploader
+                st.rerun()
 
     def _render_chat_area(self):
         """Render main chat area."""
