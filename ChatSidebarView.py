@@ -161,6 +161,9 @@ class ChatSidebarView:
                 self.upload_service.save_file_to_supabase(uploaded_file)
             
             status_container.success(f"✅ Processed {total_files} files")
+            
+            st.experimental_rerun()
+            
 
     def _render_chat_area(self):
         """Render main chat area."""
