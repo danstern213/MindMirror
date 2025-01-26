@@ -138,32 +138,29 @@ class ChatSidebarView:
         """Render the file upload section with status."""
         st.sidebar.header("Document Management")
         
-        # Show indexed file count
+        # Persistent metrics at top
         indexed_count = count_indexed_files()
         st.sidebar.metric("Indexed Documents", indexed_count)
         
-        # File uploader
+        # Status container for processing messages
+        status_container = st.sidebar.empty()
+        
+        # File uploader in fixed position
         uploaded_files = st.sidebar.file_uploader(
             "Upload Files",
             accept_multiple_files=True,
-            help="Files will be automatically indexed after upload",
-            key="file_uploader"  # Fixed key for stability
+            help="Files will be automatically indexed after upload"
         )
         
-        # Process files only if they exist and haven't been processed
-        if uploaded_files and 'last_uploaded_files' not in st.session_state:
-            st.session_state.last_uploaded_files = uploaded_files
+        # Process files when uploaded
+        if uploaded_files:
+            total_files = len(uploaded_files)
             
-            # Process each file
             for i, uploaded_file in enumerate(uploaded_files, 1):
-                st.sidebar.info(f"Processing file {i} of {len(uploaded_files)}: {uploaded_file.name}")
+                status_container.info(f"Processing file {i} of {total_files}: {uploaded_file.name}")
                 self.upload_service.save_file_to_supabase(uploaded_file)
             
-            st.sidebar.success(f"✅ Processed {len(uploaded_files)} files")
-            
-        # Clear the processed files flag when no files are selected
-        if not uploaded_files and 'last_uploaded_files' in st.session_state:
-            del st.session_state.last_uploaded_files
+            status_container.success(f"✅ Processed {total_files} files")
 
     def _render_chat_area(self):
         """Render main chat area."""
