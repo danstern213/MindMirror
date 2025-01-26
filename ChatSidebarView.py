@@ -146,7 +146,8 @@ class ChatSidebarView:
         uploaded_files = st.sidebar.file_uploader(
             "Upload Files",
             accept_multiple_files=True,
-            help="Files will be automatically indexed after upload"
+            help="Files will be automatically indexed after upload",
+            key="file_uploader"  # Add a key to the uploader
         )
         
         if uploaded_files:
@@ -164,6 +165,10 @@ class ChatSidebarView:
             
             # Show completion message briefly before clearing
             status_container.success(f"✅ Processed {total_files} files")
+            # Clear the uploader state
+            st.session_state.file_uploader = None
+            # Force a rerun to refresh the UI
+            st.rerun()
 
     def _render_chat_area(self):
         """Render main chat area."""
