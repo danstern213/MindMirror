@@ -156,6 +156,15 @@ class ChatSidebarView:
             help="Files will be automatically indexed after upload",
             key=f"file_uploader_{st.session_state.upload_counter}"
         )
+
+        # Show reset button
+        if st.sidebar.button("Clear and Upload More Files"):
+            # Increment the counter to reset the uploader
+            st.session_state.upload_counter += 1
+            # Clear the status messages
+            status_container.empty()
+            # Rerun to refresh the uploader
+            st.rerun()
         
         # Process files when uploaded
         if uploaded_files:
@@ -167,14 +176,7 @@ class ChatSidebarView:
             
             status_container.success(f"✅ Processed {total_files} files")
             
-            # Show reset button
-            if st.sidebar.button("Reset and Upload More Files"):
-                # Increment the counter to reset the uploader
-                st.session_state.upload_counter += 1
-                # Clear the status messages
-                status_container.empty()
-                # Rerun to refresh the uploader
-                st.rerun()
+            
 
     def _render_chat_area(self):
         """Render main chat area."""
