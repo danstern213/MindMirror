@@ -142,12 +142,11 @@ class ChatSidebarView:
         indexed_count = count_indexed_files()
         st.sidebar.metric("Indexed Documents", indexed_count)
         
-        # Create persistent containers
-        uploader_container = st.sidebar.empty()
+        # Status container for messages
         status_container = st.sidebar.empty()
         
         # File uploader
-        uploaded_files = uploader_container.file_uploader(
+        uploaded_files = st.sidebar.file_uploader(
             "Upload Files",
             accept_multiple_files=True,
             help="Files will be automatically indexed after upload"
@@ -164,8 +163,8 @@ class ChatSidebarView:
             
             # Show final success message
             status_container.success(f"✅ Processed {total_files} files")
-            # Clear the uploader to reset it
-            uploader_container.empty()
+            # Clear just the status messages
+            st.rerun()
 
     def _render_chat_area(self):
         """Render main chat area."""
