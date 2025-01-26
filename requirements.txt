@@ -150,8 +150,6 @@ prompt-toolkit==3.0.31
 propcache==0.2.1
 protobuf==4.25.3
 psutil==5.9.2
-psycopg2==2.9.5
-psycopg2-binary==2.9.3
 ptyprocess==0.7.0
 pulsar-client==3.5.0
 pure-eval==0.2.2
