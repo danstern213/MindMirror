@@ -146,8 +146,8 @@ class ChatSidebarView:
         indexed_count = count_indexed_files()
         st.sidebar.metric("Indexed Documents", indexed_count)
         
-        # Check for OpenAI API key
-        api_key = st.session_state.settings.get('openai_api_key')
+        # Check for OpenAI API key in both session state and secrets
+        api_key = st.session_state.settings.get('openai_api_key') or st.secrets.get('OPENAI_API_KEY')
         if not api_key:
             st.sidebar.error("⚠️ Please enter your OpenAI API key in Settings before uploading files.")
             return
