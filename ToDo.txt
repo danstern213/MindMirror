@@ -1,3 +1,2 @@
-
+Reset all my files and ensure embeddings are being created
 User Authentication so that only the user can access their own files
-OpenAI API Key authentication
