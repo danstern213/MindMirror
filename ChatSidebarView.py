@@ -301,9 +301,9 @@ Here are the relevant notes:
                 {
                     "role": "system",
                     "content": """You are a helpful AI assistant. When referencing documents, use their titles in double square brackets like this: [[Title]].
-                    Available documents and their IDs:
+                    Available documents:
                     {}
-                    """.format('\n'.join([f"- {result['id']}: {result['title']}" for result in search_results]))
+                    """.format('\n'.join([f"- {result['title']}" for result in search_results]))
                 },
                 {
                     "role": "user",
