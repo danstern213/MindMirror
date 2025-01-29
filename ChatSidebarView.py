@@ -301,9 +301,11 @@ Here are the relevant notes:
                 {
                     "role": "system",
                     "content": """You are a helpful AI assistant. When referencing documents, use their titles in double square brackets like this: [[Title]].
-                    Available documents:
+                    Available documents and their titles:
                     {}
-                    """.format('\n'.join([f"- {result['title']}" for result in search_results]))
+                    
+                    IMPORTANT: Always use the exact titles shown above when referencing documents. Never use IDs or modify the titles.
+                    """.format('\n'.join([f"- [[{result['title']}]]" for result in search_results]))
                 },
                 {
                     "role": "user",
@@ -478,14 +480,14 @@ Here are the relevant notes:
         context_parts = []
         
         for result in search_results:
-            referenced_notes.add(result['id'])
+            referenced_notes.add(result['title'])
             
             # Determine relevance indicator
             relevance_indicator = "Explicitly Referenced" if result.get('explicit') else \
                 "Highly Relevant" if result['score'] > 0.9 else "Relevant"
             
             # Build context text
-            context_text = f"[File: {result['id']}] ({relevance_indicator}"
+            context_text = f"[From [[{result['title']}]]] ({relevance_indicator}"
             if not result.get('explicit'):
                 context_text += f", score: {result['score']:.3f}"
             if result.get('keyword_score'):
@@ -493,13 +495,6 @@ Here are the relevant notes:
             if result.get('matched_keywords'):
                 context_text += f", matched terms: {', '.join(result['matched_keywords'])}"
             context_text += f")\n\nRelevant Section:\n{result['content']}"
-
-            # Add linked contexts if available
-            if result.get('linked_contexts'):
-                context_text += "\n\nRelevant content from linked notes:\n"
-                for linked in result['linked_contexts']:
-                    referenced_notes.add(linked.note_path)
-                    context_text += f"\nFrom [[{linked.note_path}]] (relevance: {linked.relevance:.3f}, link distance: {linked.link_distance}):\n{linked.context}\n"
 
             context_parts.append(context_text)
 
