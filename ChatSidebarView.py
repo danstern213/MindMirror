@@ -83,11 +83,11 @@ class ChatSidebarView:
         """Count files uploaded by the current user."""
         try:
             response = self.supabase.table('files')\
-                .select('id', count='exact')\
+                .select('*', count='exact')\
                 .filter('user_id', 'eq', st.session_state.user.id)\
                 .execute()
             
-            return len(response.data) if response.data else 0
+            return response.count if hasattr(response, 'count') else 0
         except Exception as e:
             print(f"Error counting user files: {e}")
             return 0
