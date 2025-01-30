@@ -18,30 +18,6 @@ from src.generate_embeddings import EmbeddingService
 from src.services.upload_service import UploadService
 from src.auth import Auth
 
-# def count_indexed_files() -> int:
-#     """Count the number of unique files that have embeddings in Supabase."""
-#     supabase: Client = create_client(
-#         st.secrets["SUPABASE_URL"],
-#         st.secrets["SUPABASE_KEY"]
-#     )
-    
-#     try:
-#         # Get count of distinct file_ids from embeddings
-#         response = supabase.table('embeddings')\
-#             .select('file_id', count='exact')\
-#             .execute()
-            
-#         if hasattr(response, 'error') and response.error:
-#             print(f"Error counting files: {response.error}")
-#             return 0
-            
-#         # Count unique file_ids
-#         unique_files = len(set(item['file_id'] for item in response.data))
-#         return unique_files
-#     except Exception as e:
-#         print(f"Error counting indexed files: {e}")
-#         return 0
-
 class ChatSidebarView:
     """Streamlit-based chat interface implementation."""
     
@@ -137,6 +113,12 @@ class ChatSidebarView:
             initialize_openai(api_key)
             # Force a rerun to ensure all components update
             st.rerun()
+
+        st.write(f"Logged in as: {st.session_state.user.email}")
+            if st.button("Logout"):
+                self.supabase.auth.sign_out()
+                st.session_state.user = None
+                st.rerun()
 
     def _render_thread_list(self):
         """Render thread list in sidebar."""

@@ -13,7 +13,7 @@ class Auth:
         if 'user' not in st.session_state:
             st.session_state.user = None
 
-        if st.session_state.user is None:
+        else st.session_state.user is None:
             tab1, tab2 = st.tabs(["Login", "Sign Up"])
             
             with tab1:
@@ -50,12 +50,12 @@ class Auth:
                             except Exception as e:
                                 st.error(f"Signup failed: {str(e)}")
 
-        else:
-            st.write(f"Logged in as: {st.session_state.user.email}")
-            if st.button("Logout"):
-                self.supabase.auth.sign_out()
-                st.session_state.user = None
-                st.rerun()
+        # else:
+        #     st.write(f"Logged in as: {st.session_state.user.email}")
+        #     if st.button("Logout"):
+        #         self.supabase.auth.sign_out()
+        #         st.session_state.user = None
+        #         st.rerun()
 
     def get_user_id(self) -> str:
         """Get the current user's ID."""
