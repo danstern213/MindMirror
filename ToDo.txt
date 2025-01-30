@@ -1,1 +1,2 @@
-User Authentication so that only the user can access their own files
+Create a welcome page!
+Save and encrypt openAI API key for each user

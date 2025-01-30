@@ -29,7 +29,7 @@ class EmbeddingService:
             start = end - overlap  # Create overlap with previous chunk
         return chunks
 
-    def generate_and_save_embedding(self, text: str, file_id: str):
+    def generate_and_save_embedding(self, text: str, file_id: str, user_id: str):
         """Generate embeddings for text chunks and save to Supabase."""
         try:
             # Get API key from session state
@@ -47,7 +47,8 @@ class EmbeddingService:
                         'file_id': file_id,
                         'embedding': embedding,
                         'text': chunk,
-                        'chunk_index': i
+                        'chunk_index': i,
+                        'user_id': user_id  # Add user_id to the embedding record
                     }).execute()
 
                     if hasattr(response, 'error') and response.error:
