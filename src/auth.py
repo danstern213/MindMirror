@@ -13,7 +13,7 @@ class Auth:
         if 'user' not in st.session_state:
             st.session_state.user = None
 
-        else st.session_state.user is None:
+        if st.session_state.user is None:
             tab1, tab2 = st.tabs(["Login", "Sign Up"])
             
             with tab1:
