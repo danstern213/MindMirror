@@ -115,10 +115,10 @@ class ChatSidebarView:
             st.rerun()
 
         st.write(f"Logged in as: {st.session_state.user.email}")
-            if st.button("Logout"):
-                self.supabase.auth.sign_out()
-                st.session_state.user = None
-                st.rerun()
+        if st.button("Logout"):
+            self.supabase.auth.sign_out()
+            st.session_state.user = None
+            st.rerun()
 
     def _render_thread_list(self):
         """Render thread list in sidebar."""
