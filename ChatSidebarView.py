@@ -107,9 +107,9 @@ class ChatSidebarView:
         """Count indexed files for the current user."""
         try:
             response = self.supabase.table('embeddings')\
-                .select('id', count='exact')\
-                .eq('files.user_id', st.session_state.user.id)\
-                .join('files', 'embeddings.file_id', 'files.id')\
+                .select('embeddings.id', count='exact')\
+                .filter('files.user_id', 'eq', st.session_state.user.id)\
+                .join('files', 'embeddings.file_id', 'eq', 'files.id')\
                 .execute()
             
             return len(response.data) if response.data else 0
