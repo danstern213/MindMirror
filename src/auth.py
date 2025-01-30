@@ -46,16 +46,12 @@ class Auth:
                                     "email": email,
                                     "password": password
                                 })
-                                st.success("Signed up successfully! Please check your email to verify your account.")
+                                # Set the user in session state immediately after signup
+                                st.session_state.user = response.user
+                                st.success("Signed up successfully!")
+                                st.rerun()
                             except Exception as e:
                                 st.error(f"Signup failed: {str(e)}")
-
-        # else:
-        #     st.write(f"Logged in as: {st.session_state.user.email}")
-        #     if st.button("Logout"):
-        #         self.supabase.auth.sign_out()
-        #         st.session_state.user = None
-        #         st.rerun()
 
     def get_user_id(self) -> str:
         """Get the current user's ID."""

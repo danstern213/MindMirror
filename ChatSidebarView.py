@@ -114,7 +114,6 @@ class ChatSidebarView:
             # Force a rerun to ensure all components update
             st.rerun()
 
-        st.write(f"Logged in as: {st.session_state.user.email}")
         if st.button("Logout"):
             self.supabase.auth.sign_out()
             st.session_state.user = None
