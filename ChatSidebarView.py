@@ -104,12 +104,11 @@ class ChatSidebarView:
             self._render_chat_area()
 
     def _count_user_files(self) -> int:
-        """Count indexed files for the current user."""
+        """Count files uploaded by the current user."""
         try:
-            response = self.supabase.table('embeddings')\
-                .select('embeddings.id', count='exact')\
-                .filter('files.user_id', 'eq', st.session_state.user.id)\
-                .join('files', 'embeddings.file_id', 'eq', 'files.id')\
+            response = self.supabase.table('files')\
+                .select('id', count='exact')\
+                .filter('user_id', 'eq', st.session_state.user.id)\
                 .execute()
             
             return len(response.data) if response.data else 0
