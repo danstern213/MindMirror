@@ -14,6 +14,10 @@ class UploadService:
     def save_file_to_supabase(self, uploaded_file):
         """Save file to Supabase and generate embeddings."""
         try:
+            # Ensure user is authenticated
+            if 'user' not in st.session_state or not st.session_state.user:
+                raise ValueError("User must be authenticated to upload files")
+
             # Read file content
             file_content = uploaded_file.read()
             file_name = uploaded_file.name
@@ -21,18 +25,20 @@ class UploadService:
             # Sanitize file name
             sanitized_file_name = re.sub(r'[^\w\-_\. ]', '_', file_name)
 
-            # Upload to Supabase storage
-            storage_response = self.supabase.storage.from_('documents').upload(sanitized_file_name, file_content)
+            # Upload to Supabase storage with user-specific path
+            storage_path = f"{st.session_state.user.id}/{sanitized_file_name}"
+            storage_response = self.supabase.storage.from_('documents').upload(storage_path, file_content)
 
             if hasattr(storage_response, 'error') and storage_response.error:
                 st.error(f"Error uploading {sanitized_file_name}: {storage_response.error['message']}")
                 return
 
-            # Save file metadata to files table
+            # Save file metadata to files table with user_id
             file_response = self.supabase.table('files').insert({
                 'filename': file_name,
-                'storage_path': sanitized_file_name,
+                'storage_path': storage_path,
                 'title': file_name,
+                'user_id': st.session_state.user.id,
                 'status': 'pending_embedding'
             }).execute()
 
@@ -45,7 +51,7 @@ class UploadService:
 
             # Generate and save embeddings
             content = file_content.decode('utf-8')  # Convert bytes to string
-            self.embedding_service.generate_and_save_embedding(content, file_id)
+            self.embedding_service.generate_and_save_embedding(content, file_id, st.session_state.user.id)
 
             # Update file status to 'indexed'
             self.supabase.table('files').update({

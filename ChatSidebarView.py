@@ -16,6 +16,7 @@ from src.services.search_service import SearchService, SearchResult, VaultFile
 from src.embedding_helper import generate_embedding, initialize_openai
 from src.generate_embeddings import EmbeddingService
 from src.services.upload_service import UploadService
+from src.auth import Auth
 
 def count_indexed_files() -> int:
     """Count the number of unique files that have embeddings in Supabase."""
@@ -46,6 +47,9 @@ class ChatSidebarView:
     
     def __init__(self):
         """Initialize the chat view."""
+        # Initialize auth
+        self.auth = Auth()
+        
         # Initialize settings with API key from secrets
         if 'settings' not in st.session_state:
             settings = DEFAULT_SETTINGS.copy()
@@ -62,38 +66,55 @@ class ChatSidebarView:
         if 'indexing_in_progress' not in st.session_state:
             st.session_state.indexing_in_progress = False
         
-        # Initialize vault and metadata cache
-        self.vault = DummyVault()
-        self.metadata_cache = DummyMetadataCache()
-            
-        # Initialize search service
+        # Initialize services
+        self.supabase = create_client(
+            st.secrets["SUPABASE_URL"],
+            st.secrets["SUPABASE_KEY"]
+        )
         self.search_service = SearchService(
-            vault=self.vault,
-            metadata_cache=self.metadata_cache,
+            vault=DummyVault(),
+            metadata_cache=DummyMetadataCache(),
             api_key=st.session_state.settings['openai_api_key']
         )
-
         self.upload_service = UploadService()
         self.embedding_service = EmbeddingService()
 
     def render(self):
         """Render the main chat interface."""
-        st.title("Big Brain Chat")
+        # Render authentication first
+        self.auth.render_auth()
         
-        # Show count of indexed files
-        indexed_count = count_indexed_files()
-        if indexed_count > 0:
-            st.success(f"{indexed_count} {'file has' if indexed_count == 1 else 'files have'} been indexed and are ready for search.")
-        else:
-            st.info("Upload files to begin searching through your documents.")
+        # Only show the main interface if user is authenticated
+        if st.session_state.user:
+            st.title("Big Brain Chat")
+            
+            # Show count of indexed files for current user
+            indexed_count = self._count_user_files()
+            if indexed_count > 0:
+                st.success(f"{indexed_count} {'file has' if indexed_count == 1 else 'files have'} been indexed and are ready for search.")
+            else:
+                st.info("Upload files to begin searching through your documents.")
 
-        # Rest of the UI
-        with st.sidebar:
-            self._render_settings()
-            self._render_thread_list()
-            self._render_upload_section()
-        
-        self._render_chat_area()
+            # Rest of the UI
+            with st.sidebar:
+                self._render_settings()
+                self._render_thread_list()
+                self._render_upload_section()
+            
+            self._render_chat_area()
+
+    def _count_user_files(self) -> int:
+        """Count indexed files for the current user."""
+        try:
+            response = self.supabase.table('files')\
+                .select('id', count='exact')\
+                .eq('user_id', st.session_state.user.id)\
+                .execute()
+            
+            return len(response.data) if response.data else 0
+        except Exception as e:
+            print(f"Error counting user files: {e}")
+            return 0
 
     def _render_settings(self):
         """Render settings in the sidebar."""
