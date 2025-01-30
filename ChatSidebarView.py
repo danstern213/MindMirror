@@ -165,7 +165,7 @@ class ChatSidebarView:
             st.session_state.upload_counter = 0
         
         # Persistent metrics at top
-        indexed_count = _count_user_files()
+        indexed_count = self._count_user_files()
         st.sidebar.metric("Indexed Documents", indexed_count)
         
         # Check for OpenAI API key in both session state and secrets
