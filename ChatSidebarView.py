@@ -18,29 +18,29 @@ from src.generate_embeddings import EmbeddingService
 from src.services.upload_service import UploadService
 from src.auth import Auth
 
-def count_indexed_files() -> int:
-    """Count the number of unique files that have embeddings in Supabase."""
-    supabase: Client = create_client(
-        st.secrets["SUPABASE_URL"],
-        st.secrets["SUPABASE_KEY"]
-    )
+# def count_indexed_files() -> int:
+#     """Count the number of unique files that have embeddings in Supabase."""
+#     supabase: Client = create_client(
+#         st.secrets["SUPABASE_URL"],
+#         st.secrets["SUPABASE_KEY"]
+#     )
     
-    try:
-        # Get count of distinct file_ids from embeddings
-        response = supabase.table('embeddings')\
-            .select('file_id', count='exact')\
-            .execute()
+#     try:
+#         # Get count of distinct file_ids from embeddings
+#         response = supabase.table('embeddings')\
+#             .select('file_id', count='exact')\
+#             .execute()
             
-        if hasattr(response, 'error') and response.error:
-            print(f"Error counting files: {response.error}")
-            return 0
+#         if hasattr(response, 'error') and response.error:
+#             print(f"Error counting files: {response.error}")
+#             return 0
             
-        # Count unique file_ids
-        unique_files = len(set(item['file_id'] for item in response.data))
-        return unique_files
-    except Exception as e:
-        print(f"Error counting indexed files: {e}")
-        return 0
+#         # Count unique file_ids
+#         unique_files = len(set(item['file_id'] for item in response.data))
+#         return unique_files
+#     except Exception as e:
+#         print(f"Error counting indexed files: {e}")
+#         return 0
 
 class ChatSidebarView:
     """Streamlit-based chat interface implementation."""
@@ -106,9 +106,10 @@ class ChatSidebarView:
     def _count_user_files(self) -> int:
         """Count indexed files for the current user."""
         try:
-            response = self.supabase.table('files')\
+            response = self.supabase.table('embeddings')\
                 .select('id', count='exact')\
-                .eq('user_id', st.session_state.user.id)\
+                .eq('files.user_id', st.session_state.user.id)\
+                .join('files', 'embeddings.file_id', 'files.id')\
                 .execute()
             
             return len(response.data) if response.data else 0
@@ -164,7 +165,7 @@ class ChatSidebarView:
             st.session_state.upload_counter = 0
         
         # Persistent metrics at top
-        indexed_count = count_indexed_files()
+        indexed_count = _count_user_files()
         st.sidebar.metric("Indexed Documents", indexed_count)
         
         # Check for OpenAI API key in both session state and secrets
