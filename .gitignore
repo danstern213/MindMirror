@@ -1,8 +1,10 @@
-.streamlit/secrets.toml
-data_7_7_24/
+.streamlit/
 obsidian-vault/
 obsidian-sidekick/
 .obsidian/
 .gitignore
 data_1_7_25/
 ToDo.txt
+node_modules
+src/
+ChatSideBarView.py

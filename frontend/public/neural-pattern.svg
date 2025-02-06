@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="800px" height="800px" viewBox="0 0 800 800" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <g stroke="white" fill="none" fill-rule="evenodd" opacity="0.15">
+        <g transform="translate(40, 40)">
+            <!-- Neural nodes -->
+            <circle cx="100" cy="100" r="8"/>
+            <circle cx="300" cy="150" r="8"/>
+            <circle cx="500" cy="100" r="8"/>
+            <circle cx="200" cy="300" r="8"/>
+            <circle cx="400" cy="250" r="8"/>
+            <circle cx="600" cy="300" r="8"/>
+            <circle cx="100" cy="500" r="8"/>
+            <circle cx="300" cy="450" r="8"/>
+            <circle cx="500" cy="500" r="8"/>
+            
+            <!-- Connecting lines -->
+            <path d="M100,100 L300,150 L500,100" stroke-width="2"/>
+            <path d="M200,300 L400,250 L600,300" stroke-width="2"/>
+            <path d="M100,500 L300,450 L500,500" stroke-width="2"/>
+            <path d="M100,100 L200,300 L100,500" stroke-width="2"/>
+            <path d="M300,150 L400,250 L300,450" stroke-width="2"/>
+            <path d="M500,100 L600,300 L500,500" stroke-width="2"/>
+            
+            <!-- Additional connections -->
+            <path d="M100,100 L400,250 L500,500" stroke-width="1" opacity="0.5"/>
+            <path d="M500,100 L400,250 L100,500" stroke-width="1" opacity="0.5"/>
+            <path d="M300,150 L200,300 L300,450" stroke-width="1" opacity="0.5"/>
+        </g>
+    </g>
+</svg> 
