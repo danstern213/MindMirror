@@ -1,27 +1,25 @@
-.streamlit/
-obsidian-vault/
-obsidian-sidekick/
-.obsidian/
-.gitignore
-data_1_7_25/
-ToDo.txt
-node_modules/
-src/
-ChatSideBarView.py
+# Project-specific directories and files
+/src/
+/.streamlit/
+/ChatSideBarView.py
+/ToDo.txt
+/obsidian-vault/
+/obsidian-sidekick/
+/.obsidian/
 
 # Dependencies
-node_modules/
-.pnp
+/node_modules/
+/.pnp
 .pnp.js
 
 # Testing
-coverage/
+/coverage/
 
 # Next.js
-.next/
-out/
-build/
-dist/
+/.next/
+/out/
+/build/
+/dist/
 
 # Environment files
 .env
@@ -29,8 +27,8 @@ dist/
 .env.development.local
 .env.test.local
 .env.production.local
-backend/.env
-frontend/.env.local
+/backend/.env
+/frontend/.env.local
 
 # Debug
 npm-debug.log*
@@ -42,8 +40,8 @@ yarn-error.log*
 *.pem
 
 # IDE
-.idea/
-.vscode/
+/.idea/
+/.vscode/
 *.swp
 *.swo
 
@@ -56,21 +54,21 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
-venv/
-ENV/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
+/env/
+/venv/
+/ENV/
+/build/
+/develop-eggs/
+/dist/
+/downloads/
+/eggs/
+/.eggs/
+/lib/
+/lib64/
+/parts/
+/sdist/
+/var/
+/wheels/
 *.egg-info/
 .installed.cfg
 *.egg
