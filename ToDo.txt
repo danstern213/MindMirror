@@ -1,4 +1,0 @@
-Create a welcome page!
-Save and encrypt openAI API key for each user rather than in .env
-Enable the formatting that OpenAI returns to persist rather than change the formatting
-Show more than 3 sources in the UI and confirm its returning more from semantic search
