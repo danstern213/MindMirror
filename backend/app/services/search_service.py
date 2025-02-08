@@ -31,22 +31,42 @@ class SearchService:
         """
         Perform comprehensive search combining semantic and keyword-based approaches.
         """
-        logger.info("=== Starting Search ===")
+        logger.info("=== Starting Comprehensive Search ===")
+        logger.info(f"Query: {search_query.query}")
+        logger.info(f"User ID: {search_query.user_id}")
+        logger.info(f"Requested results: {search_query.top_k}")
         
         # Generate query embedding
         query_embedding = generate_embedding(search_query.query, api_key)
         
         try:
-            # Get embeddings and file info in one query
-            response = self.supabase.table('embeddings')\
-                .select('*, files!inner(title)')\
-                .eq('user_id', str(search_query.user_id))\
-                .execute()
+            # Get embeddings and file info with pagination
+            all_embeddings = []
+            page_size = 1000
+            start = 0
             
-            if hasattr(response, 'error') and response.error:
-                logger.error(f"Error fetching embeddings: {response.error}")
-                return []
-            
+            while True:
+                response = self.supabase.table('embeddings')\
+                    .select('*, files!inner(title)')\
+                    .eq('user_id', str(search_query.user_id))\
+                    .range(start, start + page_size - 1)\
+                    .execute()
+                
+                if hasattr(response, 'error') and response.error:
+                    logger.error(f"Error fetching embeddings: {response.error}")
+                    return []
+                
+                if not response.data:
+                    break
+                    
+                all_embeddings.extend(response.data)
+                logger.info(f"Fetched {len(response.data)} embeddings (total: {len(all_embeddings)})")
+                
+                if len(response.data) < page_size:
+                    break
+                    
+                start += page_size
+                
             embeddings = [
                 {
                     'id': item['file_id'],
@@ -54,9 +74,9 @@ class SearchService:
                     'text': item['text'],
                     'title': item['files']['title']
                 } 
-                for item in response.data
+                for item in all_embeddings
             ]
-            logger.info(f"Found {len(embeddings)} embeddings")
+            logger.info(f"Found {len(embeddings)} total embeddings")
             
         except Exception as e:
             logger.error(f"Error fetching embeddings from Supabase: {e}")
@@ -90,8 +110,23 @@ class SearchService:
         for doc_id, data in grouped_results.items():
             # Sort chunks by relevance
             sorted_chunks = sorted(data['chunks'], key=lambda x: x['score'], reverse=True)
-            # Combine text from top chunks
-            combined_text = '\n'.join(chunk['text'] for chunk in sorted_chunks[:3])
+            # Combine text from more chunks for better context
+            # Use up to 5 chunks per document, with higher scores getting more weight
+            weighted_chunks = []
+            for i, chunk in enumerate(sorted_chunks[:5]):
+                weight = 1.0 - (i * 0.15)  # Decrease weight for each subsequent chunk
+                weighted_chunks.append({
+                    'text': chunk['text'],
+                    'weight': weight,
+                    'score': chunk['score']
+                })
+            
+            # Combine text with weighting
+            combined_text = '\n'.join(
+                f"{chunk['text']}" 
+                for chunk in weighted_chunks 
+                if chunk['score'] >= similarity_threshold
+            )
             
             # Calculate keyword score
             keyword_score = calculate_keyword_score(combined_text, keywords)

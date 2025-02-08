@@ -130,10 +130,19 @@ class ChatService:
     async def analyze_conversation_continuity(
         self,
         message: str,
-        thread_id: UUID
+        thread_id: UUID,
+        user_id: UUID
     ) -> Dict[str, Any]:
         """Analyze if the message is a follow-up to the previous conversation."""
-        thread = self.threads.get(thread_id)
+        if not thread_id:
+            return {
+                'is_follow_up': False,
+                'search_query': message,
+                'context': message
+            }
+
+        # Get thread history
+        thread = await self.get_thread(thread_id, user_id)
         if not thread or len(thread.messages) < 2:
             return {
                 'is_follow_up': False,
@@ -142,13 +151,8 @@ class ChatService:
             }
 
         # Get last exchange
-        last_messages = [msg for msg in thread.messages[-2:] if msg.role in ["user", "assistant"]]
-        if len(last_messages) < 2:
-            return {
-                'is_follow_up': False,
-                'search_query': message,
-                'context': message
-            }
+        messages = thread.messages
+        last_messages = messages[-3:]  # Get last 3 messages for context
 
         try:
             response = await self.openai_client.chat.completions.create(
@@ -167,22 +171,21 @@ class ChatService:
                             "searchQuery": string (if follow-up, combine relevant context from previous exchange with new query; if new topic, use just the new message)
                         }"""
                     },
-                    {"role": "user", "content": last_messages[-2].content},
-                    {"role": "assistant", "content": last_messages[-1].content},
+                    *[{"role": msg.role, "content": msg.content} for msg in last_messages[:-1]],
                     {"role": "user", "content": message}
                 ],
                 temperature=0.1
             )
-            
+
             analysis = json.loads(response.choices[0].message.content)
             
             return {
                 'is_follow_up': analysis['isFollowUp'],
                 'search_query': analysis['searchQuery'],
-                'context': f"{last_messages[-2].content}\n{last_messages[-1].content}\n{message}" if analysis['isFollowUp'] else message
+                'context': "\n".join(msg.content for msg in last_messages) if analysis['isFollowUp'] else message
             }
-        except Exception as e:
-            logger.error(f"Error analyzing conversation continuity: {e}")
+        except Exception as error:
+            logger.error(f"Error analyzing conversation continuity: {error}")
             return {
                 'is_follow_up': False,
                 'search_query': message,
@@ -201,7 +204,7 @@ class ChatService:
             relevance_indicator = "Explicitly Referenced" if result.get('explicit') else \
                 "Highly Relevant" if result['score'] > 0.9 else "Relevant"
             
-            # Build context text
+            # Build context text with detailed metadata
             context_text = f"[From [[{result['title']}]]] ({relevance_indicator}"
             if not result.get('explicit'):
                 context_text += f", score: {result['score']:.3f}"
@@ -229,28 +232,24 @@ class ChatService:
         thread_id: Optional[UUID],
         user_id: UUID
     ) -> AsyncGenerator[ChatResponse, None]:
-        """Process a user message and generate a streaming response."""
+        """Process a user message and generate a response."""
         try:
             # Get user settings
             user_settings = self.get_user_settings(user_id)
             
-            # Get explicitly referenced notes first
+            # Get conversation analysis
+            conversation_analysis = await self.analyze_conversation_continuity(content, thread_id, user_id) if thread_id else {
+                'is_follow_up': False,
+                'context': ''
+            }
+            
+            # Perform semantic search
+            search_query = SearchQuery(query=content, user_id=user_id)
+            semantic_results = await self.search_service.search(search_query)
+            
+            # Get explicitly referenced notes
             explicit_results = await self.get_explicitly_referenced_notes(content, user_id)
             
-            # Then get semantic search results
-            # Note: We intentionally limit to 3 results for chat context to:
-            # 1. Focus on the most relevant content
-            # 2. Keep context concise for better AI responses
-            # 3. Manage token usage
-            CHAT_CONTEXT_LIMIT = 3
-            semantic_results = await self.search_service.search(
-                SearchQuery(
-                    query=content,
-                    user_id=user_id,
-                    top_k=CHAT_CONTEXT_LIMIT  # Override default limit for chat context
-                )
-            )
-
             # Convert SearchResult objects to dictionaries and combine results
             explicit_dicts = [result.model_dump() for result in explicit_results]
             semantic_dicts = [result.model_dump() for result in semantic_results 
@@ -268,10 +267,8 @@ class ChatService:
                         await self.add_message(thread_id, "user", content)
                 except Exception as e:
                     logger.warning(f"Non-critical error handling thread: {e}")
-                    # Continue even if thread operations fail
-                    pass
 
-            # Prepare messages for AI
+            # Prepare messages for AI with enhanced context
             messages = [
                 {
                     "role": "system",
@@ -283,17 +280,20 @@ MEMORY CONTEXT:
 ABOUT THE USER:
 {user_settings['personal_info']}
 
+Conversation Analysis:
+{"This is a follow-up question to the previous topic. Consider the previous context while maintaining focus on new information." if conversation_analysis['is_follow_up'] else "This is a new topic. Focus on providing fresh information without being constrained by the previous conversation."}
+
+Current conversation context:
+{conversation_analysis['context']}
+
 Here are the relevant notes and their context:
 
 {context}"""
                 },
-                {
-                    "role": "user",
-                    "content": content
-                }
+                {"role": "user", "content": content}
             ]
 
-            # Get streaming AI response
+            # Get the chat completion stream
             stream = await self.openai_client.chat.completions.create(
                 model=settings.OPENAI_MODEL,
                 messages=messages,
@@ -304,45 +304,42 @@ Here are the relevant notes and their context:
                 presence_penalty=0,
                 stream=True
             )
-            
-            full_response = ""
+
+            # Process the stream
+            current_content = ""
             async for chunk in stream:
                 if chunk.choices[0].delta.content is not None:
                     content_delta = chunk.choices[0].delta.content
-                    full_response += content_delta
+                    current_content += content_delta
                     yield ChatResponse(
                         content=content_delta,
-                        sources=all_results,
-                        thread_id=thread_id,
+                        sources=all_results,  # Use all results
+                        thread_id=thread_id or UUID(int=0),
                         done=False
                     )
-            
-            # If we have a thread, add the AI response to it
+
+            # Save the assistant's message to the thread if we have one
             if thread_id:
                 try:
-                    thread = await self.get_thread(thread_id, user_id)
-                    if thread:
-                        await self.add_message(
-                            thread_id,
-                            "assistant",
-                            full_response,
-                            sources=all_results
-                        )
+                    await self.add_message(
+                        thread_id,
+                        "assistant",
+                        current_content,
+                        sources=all_results  # Use all results
+                    )
                 except Exception as e:
-                    logger.warning(f"Non-critical error handling thread: {e}")
-                    # Continue even if thread operations fail
-                    pass
-            
-            # Send final message indicating completion
+                    logger.warning(f"Non-critical error saving assistant message: {e}")
+
+            # Yield final message
             yield ChatResponse(
-                content="",
-                sources=all_results,
-                thread_id=thread_id,
+                content="",  # Don't send content in final message
+                sources=all_results,  # Use all results
+                thread_id=thread_id or UUID(int=0),
                 done=True
             )
 
         except Exception as e:
-            logger.error(f"Error processing message: {str(e)}", exc_info=True)
+            logger.error(f"Error processing message: {e}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to process message: {str(e)}"

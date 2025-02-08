@@ -6,6 +6,7 @@ import React, { ReactNode } from 'react';
 
 interface ChatMessageProps {
   message: Message;
+  isStreaming?: boolean;
 }
 
 // Process text to handle bracketed content
@@ -17,7 +18,7 @@ const processBracketedText = (text: string) => {
     if (part.startsWith('[[') && part.endsWith(']]')) {
       const innerText = part.slice(2, -2);
       return (
-        <span key={index} className="font-bold text-indigo-600">
+        <span key={index} className="font-medium text-indigo-600">
           {innerText}
         </span>
       );
@@ -45,9 +46,9 @@ const MarkdownElement = ({ tag: Tag, className, children }: { tag: any, classNam
   );
 };
 
-export function ChatMessage({ message }: ChatMessageProps) {
+export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) {
   const isAssistant = message.role === 'assistant';
-  const hasSources = message.sources && message.sources.length > 0;
+  const hasSources = !isStreaming && message.sources && message.sources.length > 0;
 
   return (
     <div className={`py-4 ${isAssistant ? 'bg-gray-50' : 'bg-white'}`}>

@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     
     # OpenAI
     OPENAI_API_KEY: str
-    OPENAI_MODEL: str = "gpt-4-0125-preview"
+    OPENAI_MODEL: str = "chatgpt-4o-latest"
     EMBEDDING_MODEL: str = "text-embedding-ada-002"
     
     # CORS
@@ -29,13 +29,13 @@ class Settings(BaseSettings):
     ALLOWED_EXTENSIONS: set = {"txt", "pdf", "md", "doc", "docx"}
     
     # Search
-    DEFAULT_SEARCH_LIMIT: int = 50
+    DEFAULT_SEARCH_LIMIT: int = 200
     SIMILARITY_THRESHOLD: float = 0.7
     HIGHLY_RELEVANT_THRESHOLD: float = 0.8
     
     # Embedding Generation
     CHUNK_SIZE: int = 2000
-    CHUNK_OVERLAP: int = 200
+    CHUNK_OVERLAP: int = 300
     
     # Chat Settings
     SYSTEM_PROMPT: str = """You are a knowledgeable assistant and a trustworthy oracle with access to the user's personal notes and memory. Your goal is to be a window into the user's brain and to help expand their understanding of their life, their work, their interests, and the world. Your name is Sidekick.

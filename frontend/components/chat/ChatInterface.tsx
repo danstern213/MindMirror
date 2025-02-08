@@ -25,6 +25,7 @@ export function ChatInterface() {
     loading,
     error,
     processingStatus,
+    isStreaming,
     fetchThreads,
     createThread,
     setCurrentThread,
@@ -116,7 +117,11 @@ export function ChatInterface() {
           {currentThread ? (
             <>
               {currentThread.messages.map((message, index) => (
-                <ChatMessage key={index} message={message} />
+                <ChatMessage 
+                  key={index} 
+                  message={message} 
+                  isStreaming={index === currentThread.messages.length - 1 && isStreaming}
+                />
               ))}
               {processingStatus && (
                 <div className="p-4 flex items-center justify-center">

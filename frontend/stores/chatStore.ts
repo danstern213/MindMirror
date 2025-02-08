@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { ChatThread, Message } from '@/types';
+import { ChatThread, Message, ChatResponse } from '@/types';
 import { api } from '@/lib/api';
 
 interface ChatState {
@@ -8,6 +8,8 @@ interface ChatState {
   loading: boolean;
   error: string | null;
   processingStatus: string;
+  currentStreamingContent: string;
+  isStreaming: boolean;
   fetchThreads: () => Promise<void>;
   createThread: (title?: string) => Promise<void>;
   setCurrentThread: (thread: ChatThread) => void;
@@ -24,6 +26,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   loading: false,
   error: null,
   processingStatus: '',
+  currentStreamingContent: '',
+  isStreaming: false,
 
   setProcessingStatus: (status: string) => {
     set({ processingStatus: status });
@@ -77,7 +81,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   sendMessage: async (content: string) => {
     const { currentThread, setProcessingStatus } = get();
-    
+
     try {
       // Add user message immediately
       const userMessage: Message = {
@@ -86,7 +90,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         timestamp: new Date().toISOString()
       };
       get().appendMessage(userMessage);
-
+      
       // Create assistant message placeholder
       const assistantMessage: Message = {
         role: 'assistant',
@@ -95,8 +99,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
       get().appendMessage(assistantMessage);
 
+      set({ isStreaming: true });
+
       try {
-        // Stream the response
         setProcessingStatus('Searching documents...');
         await new Promise(resolve => setTimeout(resolve, 500));
 
@@ -110,32 +115,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
               setProcessingStatus('Generating response...');
               await new Promise(resolve => setTimeout(resolve, 500));
             }
-            get().appendStreamToken(chunk.content);
-          }
-          if (chunk.done && chunk.sources) {
-            // Update the last message with sources
+
+            // Update immediately without accumulating
             set(state => {
               if (!state.currentThread) return state;
               const messages = [...state.currentThread.messages];
               const lastMessage = messages[messages.length - 1];
               if (lastMessage && lastMessage.role === 'assistant') {
-                lastMessage.sources = chunk.sources;
+                lastMessage.content += chunk.content;
+                if (chunk.sources) {
+                  lastMessage.sources = chunk.sources;
+                }
               }
-              const updatedThread = {
-                ...state.currentThread,
-                messages
-              };
               return {
-                currentThread: updatedThread,
-                threads: state.threads.map(t =>
-                  t.id === updatedThread.id ? updatedThread : t
-                )
+                currentThread: {
+                  ...state.currentThread,
+                  messages
+                }
               };
             });
           }
         }
       } catch (error) {
-        // Handle streaming error but keep the messages
         console.error('Error in message streaming:', error);
         throw error;
       }
@@ -150,7 +151,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Remove the assistant's placeholder message if there was an error
       set(state => {
         if (!state.currentThread) return state;
-        const messages = state.currentThread.messages.slice(0, -1); // Remove last message
+        const messages = state.currentThread.messages.slice(0, -1);
         const updatedThread = {
           ...state.currentThread,
           messages
@@ -164,6 +165,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         };
       });
     } finally {
+      set({ isStreaming: false });
       setProcessingStatus('');
     }
   },
@@ -190,7 +192,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const messages = [...state.currentThread.messages];
       const lastMessage = messages[messages.length - 1];
       if (lastMessage && lastMessage.role === 'assistant') {
-        lastMessage.content += content;
+        lastMessage.content = content;
       }
       const updatedThread = {
         ...state.currentThread,
