@@ -14,8 +14,15 @@ class ApiClient {
       console.error('No active session found');
       throw new Error('No active session');
     }
+
+    // Special handling for file uploads
+    const isFileUpload = options.body instanceof FormData;
     
-    const headers = {
+    const headers = isFileUpload ? {
+      // For file uploads, only set Authorization header
+      'Authorization': `Bearer ${session.access_token}`
+    } : {
+      // For all other requests, include Content-Type: application/json
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${session.access_token}`,
       ...options.headers,
@@ -24,6 +31,7 @@ class ApiClient {
     try {
       console.log(`API Request: ${url}`, { 
         method: options.method || 'GET',
+        isFileUpload,
         headers: {
           ...headers,
           Authorization: `Bearer ${session.access_token.substring(0, 10)}...`
@@ -37,12 +45,24 @@ class ApiClient {
       });
 
       if (!response.ok) {
-        let errorDetail;
+        let errorMessage: string;
         try {
-          const errorJson = await response.json();
-          errorDetail = errorJson.detail || `HTTP error! status: ${response.status}`;
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorData.message || `HTTP error! status: ${response.status}`;
+          
+          // Log the full error response for debugging
+          console.error('API Error Response:', {
+            status: response.status,
+            statusText: response.statusText,
+            errorData
+          });
+          
+          // For file upload errors, add more context
+          if (endpoint === '/files/upload') {
+            errorMessage = `File upload failed: ${errorMessage}`;
+          }
         } catch {
-          errorDetail = `HTTP error! status: ${response.status}`;
+          errorMessage = `Request failed with status: ${response.status} ${response.statusText}`;
         }
 
         // If unauthorized, try to refresh the session
@@ -58,24 +78,29 @@ class ApiClient {
           if (newSession) {
             console.log('Session refreshed successfully, retrying request...');
             // Retry the request with the new token
+            const retryHeaders = isFileUpload ? {
+              'Authorization': `Bearer ${newSession.access_token}`
+            } : {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${newSession.access_token}`,
+              ...options.headers,
+            };
+            
             const retryResponse = await fetch(url, {
               ...options,
-              headers: {
-                ...headers,
-                'Authorization': `Bearer ${newSession.access_token}`,
-              },
+              headers: retryHeaders,
               credentials: 'include',
             });
             
             if (!retryResponse.ok) {
-              throw new Error(errorDetail);
+              throw new Error(errorMessage);
             }
             
             return retryResponse;
           }
         }
         
-        throw new Error(errorDetail);
+        throw new Error(errorMessage);
       }
 
       return response;
@@ -86,7 +111,15 @@ class ApiClient {
         error: error instanceof Error ? error.message : 'Unknown error',
         fullError: error
       });
-      throw error;
+      
+      // Ensure we always throw an Error object with a string message
+      if (error instanceof Error) {
+        throw error;
+      } else if (typeof error === 'string') {
+        throw new Error(error);
+      } else {
+        throw new Error('An unexpected error occurred');
+      }
     }
   }
 
@@ -186,18 +219,52 @@ class ApiClient {
 
   // File endpoints
   async uploadFile(file: File): Promise<FileUpload> {
-    const formData = new FormData();
-    formData.append('file', file);
+    try {
+      const formData = new FormData();
+      formData.append('file', file, file.name);  // Explicitly include filename
 
-    const response = await this.fetch('/files/upload', {
-      method: 'POST',
-      headers: {
-        // Let the browser set the Content-Type for FormData
-        'Content-Type': undefined as any,
-      },
-      body: formData,
-    });
-    return response.json();
+      // Log file details for debugging
+      console.log('Preparing file upload:', {
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        formDataEntries: Array.from(formData.entries()).map(([key, value]) => ({
+          key,
+          type: value instanceof File ? 'File' : typeof value,
+          fileName: value instanceof File ? value.name : null,
+          size: value instanceof File ? value.size : null
+        }))
+      });
+
+      const response = await this.fetch('/files/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorDetail = await response.json();
+        console.error('File upload failed:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorDetail
+        });
+        throw new Error(errorDetail.detail || 'File upload failed');
+      }
+      
+      const result = await response.json();
+      console.log('File upload successful:', result);
+      return result;
+    } catch (error) {
+      console.error('File upload error:', {
+        error,
+        file: {
+          name: file.name,
+          type: file.type,
+          size: file.size
+        }
+      });
+      throw error;
+    }
   }
 
   async listFiles(): Promise<FileUpload[]> {

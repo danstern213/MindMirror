@@ -41,11 +41,32 @@ class UploadService:
 
     def _check_file_extension(self, filename: str) -> None:
         """Check if file extension is allowed."""
-        ext = filename.split('.')[-1].lower()
-        if ext not in settings.ALLOWED_EXTENSIONS:
+        try:
+            ext = filename.split('.')[-1].lower() if '.' in filename else ''
+            logger.info(f"Checking file extension: {ext} for file: {filename}")
+            
+            if not ext:
+                logger.error(f"No file extension found for file: {filename}")
+                raise HTTPException(
+                    status_code=422,
+                    detail="File must have an extension"
+                )
+                
+            if ext not in settings.ALLOWED_EXTENSIONS:
+                logger.error(f"Invalid file extension: {ext}. Allowed: {settings.ALLOWED_EXTENSIONS}")
+                raise HTTPException(
+                    status_code=415,
+                    detail=f"File extension .{ext} not allowed. Allowed extensions: {', '.join(settings.ALLOWED_EXTENSIONS)}"
+                )
+                
+            logger.info(f"File extension {ext} is allowed")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error checking file extension for {filename}: {str(e)}")
             raise HTTPException(
-                status_code=415,
-                detail=f"File extension .{ext} not allowed. Allowed extensions: {', '.join(settings.ALLOWED_EXTENSIONS)}"
+                status_code=422,
+                detail=f"Invalid filename or extension: {str(e)}"
             )
 
     async def save_file(
@@ -56,29 +77,58 @@ class UploadService:
     ) -> FileUploadResponse:
         """Save file to storage and generate embeddings."""
         try:
+            logger.info(f"Starting file upload process for: {file.filename}")
+            logger.info(f"User ID: {user_id}")
+            
             # Validate file
             content = await file.read()
-            self._check_file_size(len(content))
-            self._check_file_extension(file.filename)
+            content_size = len(content)
+            logger.info(f"File size: {content_size} bytes")
+            
+            try:
+                self._check_file_size(content_size)
+                logger.info("File size validation passed")
+            except HTTPException as e:
+                logger.error(f"File size validation failed: {str(e)}")
+                raise
+
+            try:
+                self._check_file_extension(file.filename)
+                logger.info("File extension validation passed")
+            except HTTPException as e:
+                logger.error(f"File extension validation failed: {str(e)}")
+                raise
             
             # Create unique filename
             file_id = uuid4()
             sanitized_filename = self._sanitize_filename(file.filename)
             storage_path = f"{user_id}/{file_id}/{sanitized_filename}"
+            logger.info(f"Generated storage path: {storage_path}")
 
             # Upload to Supabase storage
-            storage_response = self.supabase.storage.from_('documents').upload(
-                storage_path,
-                content
-            )
+            logger.info("Attempting to upload to Supabase storage")
+            try:
+                storage_response = self.supabase.storage.from_('documents').upload(
+                    storage_path,
+                    content
+                )
 
-            if hasattr(storage_response, 'error') and storage_response.error:
+                if hasattr(storage_response, 'error') and storage_response.error:
+                    logger.error(f"Supabase storage error: {storage_response.error}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Error uploading file: {storage_response.error['message']}"
+                    )
+                logger.info("Successfully uploaded to Supabase storage")
+            except Exception as e:
+                logger.error(f"Failed to upload to Supabase storage: {str(e)}")
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Error uploading file: {storage_response.error['message']}"
+                    detail=f"Failed to upload to storage: {str(e)}"
                 )
 
             # Save file metadata
+            logger.info("Saving file metadata")
             file_data = FileCreate(
                 filename=file.filename,
                 storage_path=storage_path,
@@ -87,31 +137,62 @@ class UploadService:
                 status='pending_embedding'
             )
 
-            file_response = self.supabase.table('files').insert(
-                file_data.model_dump()
-            ).execute()
+            try:
+                # Convert model to dict and ensure UUIDs are converted to strings
+                metadata = file_data.model_dump()
+                metadata['user_id'] = str(metadata['user_id'])  # Convert UUID to string
+                
+                file_response = self.supabase.table('files').insert(metadata).execute()
 
-            if hasattr(file_response, 'error') and file_response.error:
+                if hasattr(file_response, 'error') and file_response.error:
+                    logger.error(f"Database error saving metadata: {file_response.error}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Error saving file metadata: {file_response.error['message']}"
+                    )
+                logger.info("Successfully saved file metadata")
+            except Exception as e:
+                logger.error(f"Failed to save file metadata: {str(e)}")
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Error saving file metadata: {file_response.error['message']}"
+                    detail=f"Failed to save file metadata: {str(e)}"
                 )
 
             file_record = FileDB(**file_response.data[0])
 
             # Generate embeddings asynchronously
-            text_content = content.decode('utf-8')
-            await self.embedding_service.generate_and_save_embedding(
-                text_content,
-                str(file_record.id),
-                str(user_id),
-                api_key
-            )
+            logger.info("Starting embedding generation")
+            try:
+                text_content = content.decode('utf-8')
+                await self.embedding_service.generate_and_save_embedding(
+                    text_content,
+                    str(file_record.id),
+                    str(user_id),
+                    api_key
+                )
+                logger.info("Successfully generated embeddings")
+            except UnicodeDecodeError as e:
+                logger.error(f"Failed to decode file content: {str(e)}")
+                raise HTTPException(
+                    status_code=422,
+                    detail="File content must be valid UTF-8 text"
+                )
+            except Exception as e:
+                logger.error(f"Failed to generate embeddings: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to generate embeddings: {str(e)}"
+                )
 
             # Update file status
-            self.supabase.table('files').update({
-                'status': 'indexed'
-            }).eq('id', file_record.id).execute()
+            try:
+                self.supabase.table('files').update({
+                    'status': 'indexed'
+                }).eq('id', file_record.id).execute()
+                logger.info("Successfully updated file status to indexed")
+            except Exception as e:
+                logger.error(f"Failed to update file status: {str(e)}")
+                # Non-critical error, don't raise
 
             return FileUploadResponse(
                 file_id=file_record.id,
@@ -124,10 +205,10 @@ class UploadService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error processing file {file.filename}: {str(e)}")
+            logger.error(f"Unexpected error processing file {file.filename}: {str(e)}", exc_info=True)
             raise HTTPException(
                 status_code=500,
-                detail=f"An error occurred while processing the file: {str(e)}"
+                detail=f"An unexpected error occurred while processing the file: {str(e)}"
             )
 
     async def get_user_files(self, user_id: UUID) -> List[FileDB]:

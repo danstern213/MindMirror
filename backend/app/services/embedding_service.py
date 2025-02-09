@@ -4,6 +4,9 @@ from .embedding_helper import generate_embedding
 from ..core.config import get_settings
 from ..models.file import EmbeddingCreate, EmbeddingDB
 import logging
+from datetime import datetime
+from uuid import UUID, uuid4
+import json
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -21,6 +24,10 @@ class EmbeddingService:
         chunk_size = chunk_size or settings.CHUNK_SIZE
         overlap = overlap or settings.CHUNK_OVERLAP
         
+        if not text.strip():
+            logger.warning("Empty text received for chunking")
+            return []
+        
         chunks = []
         start = 0
         while start < len(text):
@@ -33,9 +40,12 @@ class EmbeddingService:
                     if pos != -1:
                         end = start + pos + len(separator)
                         break
-            chunk = text[start:end]
-            chunks.append(chunk)
+            chunk = text[start:end].strip()
+            if chunk:  # Only add non-empty chunks
+                chunks.append(chunk)
             start = end - overlap  # Create overlap with previous chunk
+        
+        logger.info(f"Split text into {len(chunks)} chunks")
         return chunks
 
     async def generate_and_save_embedding(
@@ -47,41 +57,83 @@ class EmbeddingService:
     ) -> List[EmbeddingDB]:
         """Generate embeddings for text chunks and save to Supabase."""
         try:
+            # Validate input
+            if not text.strip():
+                raise ValueError("Empty text received for embedding generation")
+            
+            # Convert string IDs to UUIDs
+            file_uuid = UUID(file_id)
+            user_uuid = UUID(user_id)
+            
             # Split text into chunks and generate embeddings
             chunks = self.chunk_text(text)
+            if not chunks:
+                raise ValueError("No valid chunks generated from text")
+                
             logger.info(f"Processing {len(chunks)} chunks for file {file_id}")
             
             embeddings = []
             # Save embeddings for each chunk
             for i, chunk in enumerate(chunks):
                 try:
+                    # Generate embedding
                     embedding = generate_embedding(chunk, api_key)
-                    embedding_data = EmbeddingCreate(
-                        file_id=file_id,
-                        embedding=embedding,
-                        text=chunk,
-                        chunk_index=i,
-                        user_id=user_id
-                    )
+                    if not embedding:
+                        logger.error(f"Failed to generate embedding for chunk {i}")
+                        continue
+                        
+                    # Validate embedding
+                    if not isinstance(embedding, list) or not all(isinstance(x, float) for x in embedding):
+                        logger.error(f"Invalid embedding format for chunk {i}")
+                        continue
                     
-                    response = self.supabase.table('embeddings').insert(
-                        embedding_data.model_dump(exclude={'id', 'created_at'})
-                    ).execute()
+                    # Create embedding data
+                    embedding_data = {
+                        # Remove the id field to let Supabase auto-increment
+                        'file_id': str(file_uuid),
+                        'user_id': str(user_uuid),
+                        'embedding': json.dumps(embedding),  # Ensure embedding is JSON serializable
+                        'text': chunk,
+                        'chunk_index': i,
+                        'created_at': datetime.utcnow().isoformat()
+                    }
+                    
+                    # Save to Supabase
+                    response = self.supabase.table('embeddings').insert(embedding_data).execute()
 
                     if hasattr(response, 'error') and response.error:
                         logger.error(f"Error saving chunk {i}: {response.error}")
-                    else:
-                        logger.info(f"Successfully saved chunk {i} for file {file_id}")
-                        embeddings.append(EmbeddingDB(**response.data[0]))
+                        raise Exception(f"Failed to save embedding: {response.error}")
+                    
+                    if not response.data or not isinstance(response.data, list) or not response.data[0]:
+                        logger.error(f"Invalid response data format: {response.data}")
+                        raise Exception("Invalid response data format from Supabase")
+                    
+                    # Create EmbeddingDB instance
+                    embedding_db = EmbeddingDB(
+                        id=response.data[0]['id'],  # This will be a bigInt from Supabase
+                        file_id=file_uuid,
+                        user_id=user_uuid,
+                        embedding=embedding,
+                        text=chunk,
+                        chunk_index=i,
+                        created_at=datetime.fromisoformat(response.data[0].get('created_at'))
+                    )
+                    
+                    logger.info(f"Successfully saved chunk {i} for file {file_id}")
+                    embeddings.append(embedding_db)
                         
                 except Exception as chunk_error:
-                    logger.error(f"Error processing chunk {i}: {chunk_error}")
-                    raise
+                    logger.error(f"Error processing chunk {i}: {str(chunk_error)}", exc_info=True)
+                    raise Exception(f"Failed to process chunk {i}: {str(chunk_error)}")
+
+            if not embeddings:
+                raise Exception("No embeddings were successfully generated and saved")
 
             return embeddings
 
         except Exception as e:
-            logger.error(f"An error occurred while generating or saving embeddings: {str(e)}")
+            logger.error(f"An error occurred while generating or saving embeddings: {str(e)}", exc_info=True)
             raise
 
     async def get_embeddings_by_file_id(self, file_id: str) -> List[EmbeddingDB]:

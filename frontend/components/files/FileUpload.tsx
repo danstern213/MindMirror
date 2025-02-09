@@ -1,9 +1,10 @@
 import { useRef, useState, useEffect } from 'react';
 import { useFileStore } from '@/stores/fileStore';
 import { DocumentPlusIcon } from '@heroicons/react/24/outline';
+import { XCircleIcon } from '@heroicons/react/20/solid';
 
 export function FileUpload() {
-  const { totalFiles, uploadFile, uploading, fetchTotalFiles } = useFileStore();
+  const { totalFiles, uploadFile, uploading, error, fetchTotalFiles, clearError } = useFileStore();
   const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -25,6 +26,7 @@ export function FileUpload() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
+    clearError();
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       await handleFiles(Array.from(e.dataTransfer.files));
@@ -33,6 +35,7 @@ export function FileUpload() {
 
   const handleChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     e.preventDefault();
+    clearError();
     if (e.target.files) {
       await handleFiles(Array.from(e.target.files));
     }
@@ -46,6 +49,7 @@ export function FileUpload() {
         fetchTotalFiles();
       } catch (error) {
         console.error(`Error uploading ${file.name}:`, error);
+        // Error is handled by the store and displayed below
       }
     }
   };
@@ -59,10 +63,28 @@ export function FileUpload() {
       </div>
 
       <div className="flex-1 p-4">
+        {error && (
+          <div className="rounded-md bg-red-50 p-4 mb-4">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <XCircleIcon className="h-5 w-5 text-red-400" aria-hidden="true" />
+              </div>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-red-800">Upload Error</h3>
+                <div className="mt-2 text-sm text-red-700">
+                  <p>{error}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div
           className={`relative border-2 border-dashed rounded-lg p-6 ${
             dragActive
               ? 'border-indigo-500 bg-indigo-50'
+              : error
+              ? 'border-red-300 hover:border-red-400'
               : 'border-gray-300 hover:border-gray-400'
           }`}
           onDragEnter={handleDrag}
@@ -85,7 +107,10 @@ export function FileUpload() {
               <button
                 type="button"
                 disabled={uploading}
-                onClick={() => inputRef.current?.click()}
+                onClick={() => {
+                  clearError();
+                  inputRef.current?.click();
+                }}
                 className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {uploading ? 'Uploading...' : 'Select files'}
@@ -93,6 +118,9 @@ export function FileUpload() {
             </div>
             <p className="mt-2 text-sm text-gray-500">
               or drag and drop files here
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              Supported formats: .txt, .pdf, .md, .doc, .docx (max 10MB)
             </p>
           </div>
         </div>
