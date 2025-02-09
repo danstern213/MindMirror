@@ -65,7 +65,7 @@ class EmbeddingService:
             file_uuid = UUID(file_id)
             user_uuid = UUID(user_id)
             
-            # Split text into chunks and generate embeddings
+            # Split text into chunks
             chunks = self.chunk_text(text)
             if not chunks:
                 raise ValueError("No valid chunks generated from text")
@@ -73,67 +73,60 @@ class EmbeddingService:
             logger.info(f"Processing {len(chunks)} chunks for file {file_id}")
             
             embeddings = []
-            # Save embeddings for each chunk
+            # Generate and save embeddings for all chunks at once
+            embedding_data_list = []
+            
             for i, chunk in enumerate(chunks):
                 try:
                     # Generate embedding
                     embedding = generate_embedding(chunk, api_key)
-                    if not embedding:
-                        logger.error(f"Failed to generate embedding for chunk {i}")
-                        continue
-                        
-                    # Validate embedding
-                    if not isinstance(embedding, list) or not all(isinstance(x, float) for x in embedding):
-                        logger.error(f"Invalid embedding format for chunk {i}")
+                    if not embedding or not isinstance(embedding, list):
+                        logger.error(f"Invalid embedding generated for chunk {i}")
                         continue
                     
-                    # Create embedding data
+                    # Prepare embedding data
                     embedding_data = {
-                        # Remove the id field to let Supabase auto-increment
                         'file_id': str(file_uuid),
                         'user_id': str(user_uuid),
-                        'embedding': json.dumps(embedding),  # Ensure embedding is JSON serializable
+                        'embedding': json.dumps(embedding),
                         'text': chunk,
                         'chunk_index': i,
                         'created_at': datetime.utcnow().isoformat()
                     }
+                    embedding_data_list.append(embedding_data)
                     
-                    # Save to Supabase
-                    response = self.supabase.table('embeddings').insert(embedding_data).execute()
-
-                    if hasattr(response, 'error') and response.error:
-                        logger.error(f"Error saving chunk {i}: {response.error}")
-                        raise Exception(f"Failed to save embedding: {response.error}")
-                    
-                    if not response.data or not isinstance(response.data, list) or not response.data[0]:
-                        logger.error(f"Invalid response data format: {response.data}")
-                        raise Exception("Invalid response data format from Supabase")
-                    
-                    # Create EmbeddingDB instance
-                    embedding_db = EmbeddingDB(
-                        id=response.data[0]['id'],  # This will be a bigInt from Supabase
-                        file_id=file_uuid,
-                        user_id=user_uuid,
-                        embedding=embedding,
-                        text=chunk,
-                        chunk_index=i,
-                        created_at=datetime.fromisoformat(response.data[0].get('created_at'))
-                    )
-                    
-                    logger.info(f"Successfully saved chunk {i} for file {file_id}")
-                    embeddings.append(embedding_db)
-                        
                 except Exception as chunk_error:
-                    logger.error(f"Error processing chunk {i}: {str(chunk_error)}", exc_info=True)
-                    raise Exception(f"Failed to process chunk {i}: {str(chunk_error)}")
-
-            if not embeddings:
-                raise Exception("No embeddings were successfully generated and saved")
-
+                    logger.error(f"Error processing chunk {i}: {str(chunk_error)}")
+                    continue
+            
+            if not embedding_data_list:
+                raise ValueError("No valid embeddings were generated")
+            
+            # Batch insert all embeddings
+            response = self.supabase.table('embeddings').insert(embedding_data_list).execute()
+            
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"Error saving embeddings: {response.error}")
+                raise Exception(f"Failed to save embeddings: {response.error}")
+            
+            # Create EmbeddingDB instances
+            for item in response.data:
+                embedding_db = EmbeddingDB(
+                    id=item['id'],
+                    file_id=file_uuid,
+                    user_id=user_uuid,
+                    embedding=json.loads(item['embedding']),
+                    text=item['text'],
+                    chunk_index=item['chunk_index'],
+                    created_at=datetime.fromisoformat(item['created_at'])
+                )
+                embeddings.append(embedding_db)
+            
+            logger.info(f"Successfully saved {len(embeddings)} embeddings for file {file_id}")
             return embeddings
 
         except Exception as e:
-            logger.error(f"An error occurred while generating or saving embeddings: {str(e)}", exc_info=True)
+            logger.error(f"Error in generate_and_save_embedding: {str(e)}", exc_info=True)
             raise
 
     async def get_embeddings_by_file_id(self, file_id: str) -> List[EmbeddingDB]:
@@ -148,7 +141,17 @@ class EmbeddingService:
                 logger.error(f"Error fetching embeddings: {response.error}")
                 raise Exception(f"Error fetching embeddings: {response.error}")
             
-            return [EmbeddingDB(**item) for item in response.data]
+            return [
+                EmbeddingDB(
+                    id=item['id'],
+                    file_id=UUID(item['file_id']),
+                    user_id=UUID(item['user_id']),
+                    embedding=json.loads(item['embedding']) if isinstance(item['embedding'], str) else item['embedding'],
+                    text=item['text'],
+                    chunk_index=item['chunk_index'],
+                    created_at=datetime.fromisoformat(item['created_at'])
+                ) for item in response.data
+            ]
         except Exception as e:
             logger.error(f"Error fetching embeddings for file {file_id}: {e}")
             raise 
