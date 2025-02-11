@@ -69,6 +69,50 @@ class UploadService:
                 detail=f"Invalid filename or extension: {str(e)}"
             )
 
+    async def _check_duplicate_file(self, filename: str, user_id: UUID) -> Optional[FileDB]:
+        """
+        Check if a file with the same name exists for the user.
+        Returns None if no duplicate exists or if the existing file needs processing
+        (status is 'error' or 'pending_embedding').
+        """
+        try:
+            response = self.supabase.table('files')\
+                .select('*')\
+                .eq('user_id', str(user_id))\
+                .eq('filename', filename)\
+                .execute()
+
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"Error checking for duplicate file: {response.error}")
+                return None
+
+            if response.data:
+                existing_file = FileDB(**response.data[0])
+                # Allow re-upload if the previous upload had errors or never completed embedding
+                if existing_file.status in ['error', 'pending_embedding']:
+                    logger.info(f"Found existing file {filename} with status {existing_file.status}, allowing re-upload")
+                    # Delete the old file record since we'll create a new one
+                    try:
+                        # Delete from storage first
+                        self.supabase.storage.from_('documents')\
+                            .remove([existing_file.storage_path])
+                        logger.info(f"Deleted old file from storage: {existing_file.storage_path}")
+                        
+                        # Then delete the database record
+                        self.supabase.table('files')\
+                            .delete()\
+                            .eq('id', existing_file.id)\
+                            .execute()
+                        logger.info(f"Deleted old file record from database: {existing_file.id}")
+                    except Exception as e:
+                        logger.error(f"Error cleaning up old file: {str(e)}")
+                    return None
+                return existing_file
+            return None
+        except Exception as e:
+            logger.error(f"Error checking for duplicate file: {str(e)}")
+            return None
+
     async def save_file(
         self,
         file: UploadFile,
@@ -79,6 +123,18 @@ class UploadService:
         try:
             logger.info(f"Starting file upload process for: {file.filename}")
             logger.info(f"User ID: {user_id}")
+            
+            # Check for duplicate file
+            existing_file = await self._check_duplicate_file(file.filename, user_id)
+            if existing_file:
+                logger.info(f"Duplicate file found: {file.filename} with status: {existing_file.status}")
+                return FileUploadResponse(
+                    file_id=existing_file.id,
+                    filename=existing_file.filename,
+                    upload_time=existing_file.created_at,
+                    status="skipped",
+                    embedding_status="skipped_duplicate"
+                )
             
             # Validate file
             content = await file.read()
@@ -134,7 +190,7 @@ class UploadService:
                 storage_path=storage_path,
                 title=file.filename,
                 user_id=user_id,
-                status='pending_embedding'
+                status='pending_embedding' if content_size > 0 else 'empty'
             )
 
             try:
@@ -160,46 +216,61 @@ class UploadService:
 
             file_record = FileDB(**file_response.data[0])
 
-            # Generate embeddings asynchronously
-            logger.info("Starting embedding generation")
-            try:
-                text_content = content.decode('utf-8')
-                await self.embedding_service.generate_and_save_embedding(
-                    text_content,
-                    str(file_record.id),
-                    str(user_id),
-                    api_key
-                )
-                logger.info("Successfully generated embeddings")
-            except UnicodeDecodeError as e:
-                logger.error(f"Failed to decode file content: {str(e)}")
-                raise HTTPException(
-                    status_code=422,
-                    detail="File content must be valid UTF-8 text"
-                )
-            except Exception as e:
-                logger.error(f"Failed to generate embeddings: {str(e)}")
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to generate embeddings: {str(e)}"
-                )
-
-            # Update file status
-            try:
-                self.supabase.table('files').update({
-                    'status': 'indexed'
-                }).eq('id', file_record.id).execute()
-                logger.info("Successfully updated file status to indexed")
-            except Exception as e:
-                logger.error(f"Failed to update file status: {str(e)}")
-                # Non-critical error, don't raise
+            # Generate embeddings asynchronously only if file is not empty
+            if content_size > 0:
+                logger.info("Starting embedding generation")
+                try:
+                    text_content = content.decode('utf-8')
+                    try:
+                        await self.embedding_service.generate_and_save_embedding(
+                            text_content,
+                            str(file_record.id),
+                            str(user_id),
+                            api_key
+                        )
+                        logger.info("Successfully generated embeddings")
+                        
+                        # Update file status to indexed
+                        try:
+                            self.supabase.table('files').update({
+                                'status': 'indexed'
+                            }).eq('id', file_record.id).execute()
+                            logger.info("Successfully updated file status to indexed")
+                        except Exception as e:
+                            logger.error(f"Failed to update file status: {str(e)}")
+                            # Non-critical error, don't raise
+                    except ValueError as ve:
+                        if "Invalid isoformat string" in str(ve):
+                            logger.warning(f"Date format error during embedding generation: {str(ve)}")
+                            # Continue processing despite date format error
+                            self.supabase.table('files').update({
+                                'status': 'indexed'
+                            }).eq('id', file_record.id).execute()
+                        else:
+                            raise
+                    except Exception as e:
+                        logger.error(f"Failed to generate embeddings: {str(e)}")
+                        # Update file status to error but don't fail the upload
+                        self.supabase.table('files').update({
+                            'status': 'error'
+                        }).eq('id', file_record.id).execute()
+                        # Don't raise the error, allow the upload to complete
+                        logger.warning(f"File saved but embeddings failed: {str(e)}")
+                except UnicodeDecodeError as e:
+                    logger.error(f"Failed to decode file content: {str(e)}")
+                    raise HTTPException(
+                        status_code=422,
+                        detail="File content must be valid UTF-8 text"
+                    )
+            else:
+                logger.info(f"Skipping embedding generation for empty file: {file.filename}")
 
             return FileUploadResponse(
                 file_id=file_record.id,
                 filename=file_record.filename,
                 upload_time=file_record.created_at,
                 status="success",
-                embedding_status="completed"
+                embedding_status="completed" if content_size > 0 else "skipped_empty"
             )
 
         except HTTPException:
