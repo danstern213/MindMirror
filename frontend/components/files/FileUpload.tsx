@@ -5,6 +5,11 @@ import { XCircleIcon } from '@heroicons/react/20/solid';
 import toast from 'react-hot-toast';
 import { UploadProgress } from './UploadProgress';
 
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 1000; // 1 second
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export function FileUpload() {
   const { totalFiles, uploadFile, uploading, error, fetchTotalFiles, clearError, setUploadProgress } = useFileStore();
   const [dragActive, setDragActive] = useState(false);
@@ -61,18 +66,42 @@ export function FileUpload() {
     }
   };
 
+  const attemptUpload = async (file: File, retryCount = 0): Promise<any> => {
+    try {
+      return await uploadFile(file);
+    } catch (error) {
+      if (retryCount < MAX_RETRIES && error instanceof Error && 
+          (error.message.includes('timeout') || error.message.includes('Failed to upload'))) {
+        // Wait before retrying
+        await sleep(RETRY_DELAY * (retryCount + 1));
+        toast(`Retrying upload for ${file.name} (attempt ${retryCount + 2}/${MAX_RETRIES + 1})`, {
+          icon: '🔄',
+        });
+        return attemptUpload(file, retryCount + 1);
+      }
+      throw error;
+    }
+  };
+
   const handleFiles = async (files: File[]) => {
     let successCount = 0;
     let skipCount = 0;
     let errorCount = 0;
 
-    // Always show individual toasts, but let the Toaster component handle limiting to 3
+    setUploadProgress({
+      currentFileIndex: 0,
+      totalFiles: files.length,
+      status: 'uploading'
+    });
+
+    // Process files one at a time to show accurate progress
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       try {
         setUploadProgress({
           currentFileIndex: i,
           currentFile: file.name,
+          totalFiles: files.length,
           status: 'uploading'
         });
 
@@ -90,27 +119,64 @@ export function FileUpload() {
           });
           successCount++;
         } else if (response.status === 'success') {
-          if (response.embedding_status === 'error') {
-            toast(`${file.name} uploaded but indexing failed. You can try uploading again.`, {
+          if (response.embedding_status === 'error' || 
+              response.embedding_status === 'error_date_format' || 
+              response.embedding_status === 'error_decode') {
+            let errorMessage = 'indexing failed';
+            if (response.embedding_status === 'error_date_format') {
+              errorMessage = 'date format issues during indexing';
+            } else if (response.embedding_status === 'error_decode') {
+              errorMessage = 'text encoding issues during indexing';
+            }
+            
+            toast(`${file.name} uploaded but ${errorMessage}. File is saved but search might be limited.`, {
               icon: '⚠️',
-              duration: 5000, // Show for longer since it's important
+              duration: 5000,
             });
             successCount++; // Still count as success since file was saved
-          } else {
+          } else if (response.embedding_status === 'skipped_empty') {
+            toast.success(`${file.name} saved successfully`);
+            successCount++;
+          } else if (response.embedding_status === 'completed') {
             toast.success(`${file.name} uploaded and indexed successfully`);
             successCount++;
+          } else {
+            toast.error(`Failed to process ${file.name}`);
+            errorCount++;
           }
         } else {
           toast.error(`Failed to process ${file.name}`);
           errorCount++;
         }
         
-        // Refresh the total count after upload
-        fetchTotalFiles();
+        // Update progress to show file is complete
+        setUploadProgress({
+          currentFileIndex: i,
+          currentFile: file.name,
+          totalFiles: files.length,
+          status: 'complete'
+        });
+
+        // Refresh the total count after each successful upload
+        await fetchTotalFiles();
+
+        // Small delay between files to prevent overwhelming the toast system
+        if (i < files.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+
       } catch (error) {
         console.error(`Error uploading ${file.name}:`, error);
-        toast.error(`Failed to upload ${file.name}`);
+        toast.error(`Failed to upload ${file.name} after multiple attempts`);
         errorCount++;
+
+        // Update progress to show error state
+        setUploadProgress({
+          currentFileIndex: i,
+          currentFile: file.name,
+          totalFiles: files.length,
+          status: 'error'
+        });
       }
     }
 
@@ -123,7 +189,7 @@ export function FileUpload() {
       
       toast(`Batch upload complete: ${summary.join(', ')}`, {
         icon: '📊',
-        duration: 5000, // Show summary for longer
+        duration: 5000,
       });
     }
 
@@ -140,7 +206,7 @@ export function FileUpload() {
     <div className="flex flex-col h-full">
       <div className="p-4 border-b">
         <h2 className="text-lg font-medium text-gray-900">
-          Documents ({totalFiles ?? 0} indexed)
+          Documents ({totalFiles ?? 0} uploaded)
         </h2>
       </div>
 

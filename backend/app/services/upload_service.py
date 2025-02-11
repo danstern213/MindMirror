@@ -215,6 +215,7 @@ class UploadService:
                 )
 
             file_record = FileDB(**file_response.data[0])
+            embedding_status = "skipped_empty"
 
             # Generate embeddings asynchronously only if file is not empty
             if content_size > 0:
@@ -229,6 +230,7 @@ class UploadService:
                             api_key
                         )
                         logger.info("Successfully generated embeddings")
+                        embedding_status = "completed"
                         
                         # Update file status to indexed
                         try:
@@ -238,39 +240,37 @@ class UploadService:
                             logger.info("Successfully updated file status to indexed")
                         except Exception as e:
                             logger.error(f"Failed to update file status: {str(e)}")
-                            # Non-critical error, don't raise
                     except ValueError as ve:
                         if "Invalid isoformat string" in str(ve):
                             logger.warning(f"Date format error during embedding generation: {str(ve)}")
+                            embedding_status = "error_date_format"
                             # Continue processing despite date format error
                             self.supabase.table('files').update({
                                 'status': 'indexed'
                             }).eq('id', file_record.id).execute()
                         else:
-                            raise
+                            embedding_status = "error"
+                            logger.error(f"Embedding generation failed: {str(ve)}")
                     except Exception as e:
+                        embedding_status = "error"
                         logger.error(f"Failed to generate embeddings: {str(e)}")
                         # Update file status to error but don't fail the upload
                         self.supabase.table('files').update({
                             'status': 'error'
                         }).eq('id', file_record.id).execute()
-                        # Don't raise the error, allow the upload to complete
-                        logger.warning(f"File saved but embeddings failed: {str(e)}")
                 except UnicodeDecodeError as e:
+                    embedding_status = "error_decode"
                     logger.error(f"Failed to decode file content: {str(e)}")
-                    raise HTTPException(
-                        status_code=422,
-                        detail="File content must be valid UTF-8 text"
-                    )
-            else:
-                logger.info(f"Skipping embedding generation for empty file: {file.filename}")
+                    self.supabase.table('files').update({
+                        'status': 'error'
+                    }).eq('id', file_record.id).execute()
 
             return FileUploadResponse(
                 file_id=file_record.id,
                 filename=file_record.filename,
                 upload_time=file_record.created_at,
                 status="success",
-                embedding_status="completed" if content_size > 0 else "skipped_empty"
+                embedding_status=embedding_status
             )
 
         except HTTPException:
