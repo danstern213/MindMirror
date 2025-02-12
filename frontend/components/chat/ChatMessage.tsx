@@ -13,7 +13,7 @@ interface ChatMessageProps {
 const processBracketedText = (text: string) => {
   if (typeof text !== 'string') return text;
   
-  const parts = text.split(/(\[\[(?:(?!\]\]).)*\]\])/g);
+  const parts = text.split(/(\[\[.*?\]\]|\[.*?\]\(.*?\))/g);
   return parts.map((part, index) => {
     if (part.startsWith('[[') && part.endsWith(']]')) {
       const innerText = part.slice(2, -2);
@@ -32,6 +32,13 @@ const MarkdownElement = ({ tag: Tag, className, children }: { tag: any, classNam
   const processChildren = (child: ReactNode): ReactNode => {
     if (typeof child === 'string') {
       return processBracketedText(child);
+    }
+    if (React.isValidElement(child) && child.props) {
+      const props = { ...child.props };
+      if (props.children) {
+        props.children = processChildren(props.children);
+      }
+      return React.cloneElement(child, props);
     }
     return child;
   };
@@ -65,37 +72,69 @@ export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) 
             <div className="prose prose-indigo max-w-none">
               <ReactMarkdown
                 components={{
-                  p: ({ children }) => (
-                    <MarkdownElement tag="p" className="my-3">
+                  p: ({ children, ...props }) => (
+                    <MarkdownElement tag="p" className="my-3 text-gray-700" {...props}>
                       {children}
                     </MarkdownElement>
                   ),
-                  h1: ({ children }) => (
-                    <MarkdownElement tag="h1" className="text-2xl font-bold mt-6 mb-4">
+                  h1: ({ children, ...props }) => (
+                    <MarkdownElement tag="h1" className="text-3xl font-bold mt-8 mb-4 text-gray-900" {...props}>
                       {children}
                     </MarkdownElement>
                   ),
-                  h2: ({ children }) => (
-                    <MarkdownElement tag="h2" className="text-xl font-bold mt-5 mb-3">
+                  h2: ({ children, ...props }) => (
+                    <MarkdownElement tag="h2" className="text-2xl font-bold mt-6 mb-3 text-gray-900" {...props}>
                       {children}
                     </MarkdownElement>
                   ),
-                  h3: ({ children }) => (
-                    <MarkdownElement tag="h3" className="text-lg font-bold mt-4 mb-2">
+                  h3: ({ children, ...props }) => (
+                    <MarkdownElement tag="h3" className="text-xl font-bold mt-5 mb-2 text-gray-900" {...props}>
                       {children}
                     </MarkdownElement>
                   ),
-                  li: ({ children }) => (
-                    <MarkdownElement tag="li" className="my-1">
+                  ul: ({ children }) => (
+                    <ul className="list-disc list-outside pl-5 my-4 space-y-2 text-gray-700">
+                      {children}
+                    </ul>
+                  ),
+                  ol: ({ children }) => (
+                    <ol className="list-decimal list-outside pl-5 my-4 space-y-2 text-gray-700">
+                      {children}
+                    </ol>
+                  ),
+                  li: ({ children, ...props }) => (
+                    <MarkdownElement tag="li" className="pl-2 my-1" {...props}>
                       {children}
                     </MarkdownElement>
+                  ),
+                  a: ({ href, children }) => (
+                    <a href={href} className="text-indigo-600 hover:text-indigo-700 font-medium">
+                      {children}
+                    </a>
+                  ),
+                  strong: ({ children }) => (
+                    <strong className="font-bold text-gray-900">
+                      {children}
+                    </strong>
+                  ),
+                  em: ({ children }) => (
+                    <em className="italic">
+                      {children}
+                    </em>
+                  ),
+                  blockquote: ({ children }) => (
+                    <blockquote className="border-l-4 border-indigo-200 pl-4 my-4 italic text-gray-700">
+                      {children}
+                    </blockquote>
                   ),
                   code: ({ className, children }) => {
                     const isInline = !className;
                     return isInline ? (
-                      <code className="bg-gray-100 rounded px-1">{children}</code>
+                      <code className="bg-gray-100 rounded px-1.5 py-0.5 font-mono text-sm text-gray-800">
+                        {children}
+                      </code>
                     ) : (
-                      <code className="block bg-gray-100 rounded p-2 my-2 whitespace-pre-wrap">
+                      <code className="block bg-gray-100 rounded p-3 my-3 whitespace-pre-wrap font-mono text-sm text-gray-800 overflow-x-auto">
                         {children}
                       </code>
                     );
@@ -146,4 +185,4 @@ export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) 
       </div>
     </div>
   );
-} 
+}
