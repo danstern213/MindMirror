@@ -21,7 +21,10 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "text-embedding-ada-002"
     
     # CORS
-    BACKEND_CORS_ORIGINS: List[str] = ["http://localhost:3000"]
+    BACKEND_CORS_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "https://*.vercel.app",  # Allow all Vercel preview deployments
+    ]
     
     # File Upload
     UPLOAD_DIR: str = "uploads"
