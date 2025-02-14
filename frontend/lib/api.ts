@@ -41,7 +41,7 @@ class ApiClient {
       const response = await fetch(url, {
         ...options,
         headers,
-        credentials: 'include',
+        credentials: 'same-origin',
       });
 
       if (!response.ok) {
@@ -89,7 +89,7 @@ class ApiClient {
             const retryResponse = await fetch(url, {
               ...options,
               headers: retryHeaders,
-              credentials: 'include',
+              credentials: 'same-origin',
             });
             
             if (!retryResponse.ok) {
