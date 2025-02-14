@@ -19,23 +19,66 @@ logger = logging.getLogger(__name__)
 def get_supabase_client() -> Client:
     """Get Supabase client instance."""
     try:
+        # Log connection attempt (without exposing sensitive data)
+        logger.info(f"Attempting to connect to Supabase at URL: {settings.SUPABASE_URL}")
+        logger.info("Supabase key length: " + str(len(settings.SUPABASE_KEY)) if settings.SUPABASE_KEY else "No key provided")
+
+        if not settings.SUPABASE_URL or not settings.SUPABASE_URL.startswith('https://'):
+            logger.error(f"Invalid Supabase URL format: {settings.SUPABASE_URL}")
+            raise ValueError("Invalid Supabase URL format")
+
+        if not settings.SUPABASE_KEY:
+            logger.error("Supabase key is missing or empty")
+            raise ValueError("Supabase key is required")
+
         # Create client with minimal options
-        return create_client(
+        client = create_client(
             supabase_url=settings.SUPABASE_URL,
             supabase_key=settings.SUPABASE_KEY,
             options={
                 "auth": {
                     "autoRefreshToken": True,
                     "persistSession": True
+                },
+                "db": {
+                    "schema": "public"
                 }
             }
+        )
+
+        # Test the connection
+        logger.info("Testing Supabase connection...")
+        # Try a simple query to verify connection
+        test_response = client.table('files').select('id').limit(1).execute()
+        logger.info("Supabase connection test successful")
+        
+        return client
+
+    except ValueError as ve:
+        logger.error(f"Validation error: {str(ve)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Configuration error: {str(ve)}"
         )
     except Exception as e:
         logger.error(f"Failed to create Supabase client: {str(e)}")
         logger.error(f"Full traceback: {traceback.format_exc()}")
+        # Check for specific error types
+        if "not found" in str(e).lower():
+            logger.error("Table 'files' not found - database might not be initialized")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database tables not initialized properly"
+            )
+        if "unauthorized" in str(e).lower() or "forbidden" in str(e).lower():
+            logger.error("Authorization failed with Supabase")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database authorization failed - check credentials"
+            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to initialize database connection"
+            detail=f"Failed to initialize database connection: {str(e)}"
         )
 
 async def get_user_id_from_supabase(request: Request, client: Client = Depends(get_supabase_client)) -> UUID:
