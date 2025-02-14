@@ -2,6 +2,8 @@ from fastapi import Depends, HTTPException, status, Request
 from supabase import Client, create_client
 from typing import Optional
 from uuid import UUID
+import logging
+import traceback
 
 from .config import get_settings
 from ..services.settings_service import SettingsService
@@ -12,10 +14,29 @@ from ..services.chat_service import ChatService
 from ..services.embedding_service import EmbeddingService
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 def get_supabase_client() -> Client:
     """Get Supabase client instance."""
-    return create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+    try:
+        # Create client with minimal options
+        return create_client(
+            supabase_url=settings.SUPABASE_URL,
+            supabase_key=settings.SUPABASE_KEY,
+            options={
+                "auth": {
+                    "autoRefreshToken": True,
+                    "persistSession": True
+                }
+            }
+        )
+    except Exception as e:
+        logger.error(f"Failed to create Supabase client: {str(e)}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to initialize database connection"
+        )
 
 async def get_user_id_from_supabase(request: Request, client: Client = Depends(get_supabase_client)) -> UUID:
     """Get user ID from Supabase session."""
