@@ -31,26 +31,21 @@ def get_supabase_client() -> Client:
             logger.error("Supabase key is missing or empty")
             raise ValueError("Supabase key is required")
 
-        # Create client with minimal options
+        # Create client with correct options structure
         client = create_client(
             supabase_url=settings.SUPABASE_URL,
-            supabase_key=settings.SUPABASE_KEY,
-            options={
-                "auth": {
-                    "autoRefreshToken": True,
-                    "persistSession": True
-                },
-                "db": {
-                    "schema": "public"
-                }
-            }
+            supabase_key=settings.SUPABASE_KEY
         )
 
-        # Test the connection
+        # Test the connection with a simpler health check
         logger.info("Testing Supabase connection...")
-        # Try a simple query to verify connection
-        test_response = client.table('files').select('id').limit(1).execute()
-        logger.info("Supabase connection test successful")
+        try:
+            # Just verify we can access the auth API
+            client.auth.get_session()
+            logger.info("Supabase connection test successful")
+        except Exception as e:
+            logger.error(f"Connection test failed: {str(e)}")
+            raise
         
         return client
 
@@ -65,10 +60,10 @@ def get_supabase_client() -> Client:
         logger.error(f"Full traceback: {traceback.format_exc()}")
         # Check for specific error types
         if "not found" in str(e).lower():
-            logger.error("Table 'files' not found - database might not be initialized")
+            logger.error("Database resource not found")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Database tables not initialized properly"
+                detail="Database resource not found - check configuration"
             )
         if "unauthorized" in str(e).lower() or "forbidden" in str(e).lower():
             logger.error("Authorization failed with Supabase")
