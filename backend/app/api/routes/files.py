@@ -3,6 +3,7 @@ from typing import List
 from uuid import UUID
 from fastapi import status
 import logging
+import traceback
 
 from ...services.upload_service import UploadService
 from ...models.file import FileDB, FileUploadResponse
@@ -149,14 +150,31 @@ async def count_files(
 ) -> dict:
     """Get the total number of files for the current user."""
     try:
+        logger.info(f"Counting files for user: {current_user_id}")
+        
+        # Verify Supabase connection
+        if not service.supabase:
+            logger.error("Supabase client not initialized")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database connection not initialized"
+            )
+            
+        # Log the query we're about to make
+        logger.info(f"Querying files table for user_id: {str(current_user_id)}")
+        
         # Get all files without limit
         response = service.supabase.table('files')\
             .select('id', count='exact')\
             .eq('user_id', str(current_user_id))\
             .execute()
+            
+        logger.info(f"Query response: {response}")
         
         return {"count": response.count or 0}
     except Exception as e:
+        logger.error(f"Failed to count files: {str(e)}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to count files: {str(e)}"
