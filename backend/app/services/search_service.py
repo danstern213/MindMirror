@@ -39,14 +39,18 @@ class SearchService:
         # Generate query embedding
         query_embedding = generate_embedding(search_query.query, api_key)
         
+        # Initialize constants
+        similarity_threshold = 0.75  # Match src implementation
+        highly_relevant_threshold = 0.8  # Match src implementation
+        page_size = 500  # Reduced batch size for memory efficiency
+        
         try:
-            # Process embeddings in batches to manage memory
-            all_results = []
-            page_size = 500  # Reduced batch size
+            # Process embeddings in batches and maintain only the top results
+            grouped_results: Dict[str, Dict[str, Any]] = {}
             offset = 0
-            max_total_results = 50  # Maximum results to return
             
             while True:
+                logger.info(f"Fetching batch at offset {offset}")
                 response = self.supabase.table('embeddings')\
                     .select('*, files!inner(title)')\
                     .eq('user_id', str(search_query.user_id))\
@@ -60,90 +64,64 @@ class SearchService:
                 
                 if not response.data:
                     break
+                
+                batch_size = len(response.data)
+                logger.info(f"Processing batch of {batch_size} embeddings")
+                
+                # Process each embedding in the batch
+                for item in response.data:
+                    embedding = json.loads(item['embedding']) if isinstance(item['embedding'], str) else item['embedding']
+                    score = cosine_similarity(query_embedding, embedding)
                     
-                # Process this batch
-                batch_embeddings = [
-                    {
-                        'id': item['file_id'],
-                        'embedding': json.loads(item['embedding']) if isinstance(item['embedding'], str) else item['embedding'],
-                        'text': item['text'],
-                        'title': item['files']['title']
-                    } 
-                    for item in response.data
-                ]
-                
-                logger.info(f"Processing batch of {len(batch_embeddings)} embeddings (offset: {offset})")
-                
-                # Calculate similarities for this batch
-                batch_results = []
-                for doc in batch_embeddings:
-                    score = cosine_similarity(query_embedding, doc['embedding'])
                     if score >= similarity_threshold:
-                        batch_results.append({
-                            'id': doc['id'],
-                            'score': score,
-                            'text': doc['text'],
-                            'title': doc['title']
-                        })
+                        doc_id = item['file_id']
+                        if doc_id not in grouped_results:
+                            grouped_results[doc_id] = {
+                                'id': doc_id,
+                                'score': score,
+                                'chunks': [],
+                                'title': item['files']['title']
+                            }
+                        # Only keep the top 5 chunks per document
+                        if len(grouped_results[doc_id]['chunks']) < 5:
+                            grouped_results[doc_id]['chunks'].append({
+                                'text': item['text'],
+                                'score': score
+                            })
+                        else:
+                            # Replace lower scoring chunk if this one is better
+                            min_chunk = min(grouped_results[doc_id]['chunks'], key=lambda x: x['score'])
+                            if score > min_chunk['score']:
+                                grouped_results[doc_id]['chunks'].remove(min_chunk)
+                                grouped_results[doc_id]['chunks'].append({
+                                    'text': item['text'],
+                                    'score': score
+                                })
                 
-                # Sort batch results and keep top ones
-                batch_results.sort(key=lambda x: x['score'], reverse=True)
-                all_results.extend(batch_results)
-                
-                # Sort and trim all results to keep memory usage down
-                all_results.sort(key=lambda x: x['score'], reverse=True)
-                all_results = all_results[:max_total_results]
-                
-                if len(response.data) < page_size:
+                if batch_size < page_size:
                     break
                     
                 offset += page_size
             
-            # Group results by file_id
-            grouped_results: Dict[str, Dict[str, Any]] = {}
-            for result in all_results:
-                doc_id = result['id']
-                if doc_id not in grouped_results:
-                    grouped_results[doc_id] = {
-                        'id': doc_id,
-                        'score': result['score'],
-                        'chunks': [],
-                        'title': result['title']
-                    }
-                grouped_results[doc_id]['chunks'].append({
-                    'text': result['text'],
-                    'score': result['score']
-                })
+            logger.info(f"Found {len(grouped_results)} relevant documents")
             
-            # Process and combine results
+            # Extract keywords once for all documents
             keywords = extract_keywords(search_query.query)
             results: List[SearchResult] = []
             
+            # Process each document's results
             for doc_id, data in grouped_results.items():
-                # Sort chunks by relevance
+                # Sort chunks by score
                 sorted_chunks = sorted(data['chunks'], key=lambda x: x['score'], reverse=True)
-                # Use up to 5 chunks per document
-                weighted_chunks = []
-                for i, chunk in enumerate(sorted_chunks[:5]):
-                    weight = 1.0 - (i * 0.15)  # Decrease weight for each subsequent chunk
-                    weighted_chunks.append({
-                        'text': chunk['text'],
-                        'weight': weight,
-                        'score': chunk['score']
-                    })
                 
-                # Combine text with weighting
-                combined_text = '\n'.join(
-                    f"{chunk['text']}" 
-                    for chunk in weighted_chunks 
-                    if chunk['score'] >= similarity_threshold
-                )
+                # Combine text from chunks
+                combined_text = '\n'.join(chunk['text'] for chunk in sorted_chunks)
                 
                 # Calculate keyword score
                 keyword_score = calculate_keyword_score(combined_text, keywords)
                 matched_keywords = [k for k in keywords if k.lower() in combined_text.lower()]
                 
-                # Get linked contexts if score is high enough
+                # Get linked contexts only for highly relevant results
                 linked_contexts = []
                 if data['score'] >= highly_relevant_threshold:
                     linked_contexts = await get_linked_contexts(combined_text, query_embedding, api_key)
@@ -158,9 +136,9 @@ class SearchService:
                     linked_contexts=linked_contexts
                 ))
             
-            # Sort by score and return top results
+            # Sort and return top results
             sorted_results = sorted(results, key=lambda x: x.score, reverse=True)
-            return sorted_results[:max_total_results]
+            return sorted_results[:50]
             
         except Exception as e:
             logger.error(f"Error fetching embeddings from Supabase: {e}")
