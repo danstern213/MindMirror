@@ -59,7 +59,7 @@ export function AuthForm() {
               transition={{ delay: 0.3 }}
               className="text-4xl font-bold text-white"
             >
-              BigBrain
+              AI Note Copilot
             </motion.h1>
             <motion.p 
               initial={{ opacity: 0, y: 20 }}
@@ -67,7 +67,7 @@ export function AuthForm() {
               transition={{ delay: 0.4 }}
               className="mt-4 text-xl text-white/80"
             >
-              Your AI-powered second brain for seamless knowledge management
+              Cultivate the knowledge that you already have.  Find it when you need it.
             </motion.p>
           </div>
           

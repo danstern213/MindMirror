@@ -20,7 +20,7 @@ export default function RootLayout({
     <html lang="en" className={`${inter.variable} h-full antialiased`}>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>MemoryMirror</title>
+        <title>AI Note Copilot</title>
         <meta
           name="description"
           content="Your personal knowledge companion"

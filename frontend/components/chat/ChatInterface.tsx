@@ -92,7 +92,7 @@ export function ChatInterface() {
       <div className="flex flex-col w-64 border-r">
         <div className="p-4 border-b">
           <div className="flex items-center justify-between">
-            <h1 className="text-xl font-semibold text-gray-900">MemoryMirror</h1>
+            <h1 className="text-xl font-semibold text-gray-900">AI Note Copilot</h1>
             <button
               onClick={() => setSettingsOpen(true)}
               className="p-2 text-gray-400 hover:text-gray-500 rounded-full hover:bg-gray-100"
