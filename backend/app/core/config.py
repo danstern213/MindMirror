@@ -5,7 +5,7 @@ from functools import lru_cache
 class Settings(BaseSettings):
     # API Configuration
     API_V1_STR: str = "/api/v1"
-    PROJECT_NAME: str = "Big Brain API"
+    PROJECT_NAME: str = "MemoryMirror API"
     
     # Security
     SECRET_KEY: str

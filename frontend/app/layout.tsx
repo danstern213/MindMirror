@@ -20,16 +20,17 @@ export default function RootLayout({
     <html lang="en" className={`${inter.variable} h-full antialiased`}>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>BigBrain - Your Second Brain</title>
+        <title>MemoryMirror</title>
         <meta
           name="description"
-          content="BigBrain helps you organize and connect your thoughts, documents, and ideas."
+          content="Your personal knowledge companion"
         />
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
       </head>
-      <body className="min-h-screen bg-gradient-to-b from-white to-gray-50">
+      <body className="h-screen overflow-hidden bg-gradient-to-b from-white to-gray-50">
         <AuthProvider>
-          <div className="relative min-h-screen">
-            <main className="relative z-10">
+          <div className="h-full">
+            <main className="relative h-full">
               {children}
             </main>
             <Toaster 

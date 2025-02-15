@@ -87,12 +87,12 @@ export function ChatInterface() {
   }
 
   return (
-    <div className="flex h-screen bg-white">
+    <div className="fixed inset-0 flex bg-white">
       {/* Sidebar */}
       <div className="flex flex-col w-64 border-r">
         <div className="p-4 border-b">
           <div className="flex items-center justify-between">
-            <h1 className="text-xl font-semibold text-gray-900">Big Brain</h1>
+            <h1 className="text-xl font-semibold text-gray-900">MemoryMirror</h1>
             <button
               onClick={() => setSettingsOpen(true)}
               className="p-2 text-gray-400 hover:text-gray-500 rounded-full hover:bg-gray-100"
@@ -101,50 +101,56 @@ export function ChatInterface() {
             </button>
           </div>
         </div>
-        <ChatThreadList
-          threads={threads}
-          currentThreadId={currentThread?.id}
-          onSelectThread={setCurrentThread}
-          onCreateThread={handleCreateThread}
-          onDeleteThread={deleteThread}
-        />
+        <div className="flex-1 overflow-y-auto">
+          <ChatThreadList
+            threads={threads}
+            currentThreadId={currentThread?.id}
+            onSelectThread={setCurrentThread}
+            onCreateThread={handleCreateThread}
+            onDeleteThread={deleteThread}
+          />
+        </div>
       </div>
 
       {/* Main content */}
       <div className="flex-1 flex flex-col">
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto">
-          {currentThread ? (
-            <>
-              {currentThread.messages.map((message, index) => (
-                <ChatMessage 
-                  key={index} 
-                  message={message} 
-                  isStreaming={index === currentThread.messages.length - 1 && isStreaming}
-                />
-              ))}
-              {processingStatus && (
-                <div className="p-4 flex items-center justify-center">
-                  <div className="flex items-center space-x-2">
-                    <div className="animate-pulse h-2 w-2 rounded-full bg-indigo-500"></div>
-                    <div className="text-sm text-gray-500">{processingStatus}</div>
+        <div className="flex-1 overflow-y-auto px-4">
+          <div className="max-w-4xl mx-auto">
+            {currentThread ? (
+              <>
+                {currentThread.messages.map((message, index) => (
+                  <ChatMessage 
+                    key={index} 
+                    message={message} 
+                    isStreaming={index === currentThread.messages.length - 1 && isStreaming}
+                  />
+                ))}
+                {processingStatus && (
+                  <div className="p-4 flex items-center justify-center">
+                    <div className="flex items-center space-x-2">
+                      <div className="animate-pulse h-2 w-2 rounded-full bg-indigo-500"></div>
+                      <div className="text-sm text-gray-500">{processingStatus}</div>
+                    </div>
                   </div>
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="h-full flex items-center justify-center text-gray-500">
-              Select a chat or start a new one
-            </div>
-          )}
+                )}
+              </>
+            ) : (
+              <div className="h-full flex items-center justify-center text-gray-500">
+                Select a chat or start a new one
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Input */}
-        <div className="border-t">
-          <ChatInput
-            onSendMessage={sendMessage}
-            disabled={!currentThread || processingStatus !== ''}
-          />
+        <div className="border-t bg-white">
+          <div className="max-w-4xl mx-auto">
+            <ChatInput
+              onSendMessage={sendMessage}
+              disabled={!currentThread || processingStatus !== ''}
+            />
+          </div>
         </div>
       </div>
 
@@ -153,7 +159,9 @@ export function ChatInterface() {
         <div className="p-4 border-b">
           <h2 className="text-lg font-medium text-gray-900">Documents</h2>
         </div>
-        <FileUpload />
+        <div className="flex-1 overflow-y-auto">
+          <FileUpload />
+        </div>
       </div>
 
       {/* Settings modal */}

@@ -72,17 +72,25 @@ async def get_linked_contexts(
     """Extract and process linked contexts from content."""
     import re
     link_regex = r'\[\[(.*?)\]\]'
-    matches = re.finditer(link_regex, content)
+    matches = list(re.finditer(link_regex, content))
     linked_contexts: List[LinkedContext] = []
+    
+    if not matches:
+        return []
     
     similarity_threshold = similarity_threshold or settings.SIMILARITY_THRESHOLD
     
-    for match in matches:
-        path = match.group(1).split('|')[0]  # Handle aliased links
-        try:
-            # Generate embedding for the linked content
-            linked_embedding = generate_embedding(path, api_key)
-            relevance = cosine_similarity(query_embedding, linked_embedding)
+    # Extract all paths
+    paths = [match.group(1).split('|')[0] for match in matches]
+    
+    try:
+        # Generate one embedding for all paths combined
+        combined_text = " | ".join(paths)
+        combined_embedding = generate_embedding(combined_text, api_key)
+        
+        # Process each path with the combined embedding
+        for path in paths:
+            relevance = cosine_similarity(query_embedding, combined_embedding)
             
             if relevance >= similarity_threshold:
                 linked_contexts.append(
@@ -92,7 +100,7 @@ async def get_linked_contexts(
                         context=extract_relevant_section(path)
                     )
                 )
-        except Exception as e:
-            print(f"Error processing linked note {path}: {e}")
+    except Exception as e:
+        logger.error(f"Error processing linked notes: {e}")
     
     return sorted(linked_contexts, key=lambda x: x.relevance, reverse=True) 
