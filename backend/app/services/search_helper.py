@@ -29,7 +29,10 @@ def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
 
 def extract_keywords(text: str) -> List[str]:
     """Extract meaningful keywords from text."""
-    words = text.lower().replace('[^a-zA-Z0-9\s]', '').split()
+    import re
+    # Use re.sub with a raw string pattern for proper escaping
+    cleaned_text = re.sub(r'[^a-zA-Z0-9\s]', '', text.lower())
+    words = cleaned_text.split()
     words = [word for word in words if len(word) > 2]
     
     stop_words = {
