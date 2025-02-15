@@ -43,13 +43,14 @@ class SearchService:
             # Get embeddings and file info with pagination
             all_embeddings = []
             page_size = 1000
-            start = 0
+            offset = 0
             
             while True:
                 response = self.supabase.table('embeddings')\
                     .select('*, files!inner(title)')\
                     .eq('user_id', str(search_query.user_id))\
-                    .range(start, start + page_size - 1)\
+                    .limit(page_size)\
+                    .offset(offset)\
                     .execute()
                 
                 if hasattr(response, 'error') and response.error:
@@ -65,7 +66,7 @@ class SearchService:
                 if len(response.data) < page_size:
                     break
                     
-                start += page_size
+                offset += page_size
                 
             embeddings = [
                 {
