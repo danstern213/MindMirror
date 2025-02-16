@@ -83,8 +83,6 @@ When synthesizing information:
 - When appropriate, encourage the user to explore related topics in their notes
 
 Remember: Each new question is an opportunity to discover new connections in the user's notes, even if it seems related to the previous conversation."""
-
-    MEMORY_CONTEXT: str = ""  # Can be updated with user-specific memory/context
     
     class Config:
         env_file = ".env"

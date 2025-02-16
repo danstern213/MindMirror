@@ -26,20 +26,9 @@ class SettingsService:
                 default_settings = {
                     'user_id': str(user_id),
                     'personal_info': '',
-                    'memory': '',
                     'model': settings.OPENAI_MODEL,
                     'openai_api_key': None,  # User can provide their own key
-                    'excluded_folders': [],
-                    'suggested_prompts': [
-                        "What are three small wins I can aim for today?",
-                        "Help me reflect on my day. What went well, and what could have gone better?",
-                        "Write a draft of my weekly review for this week",
-                        "Summarize me as a person, including my strengths and growth opportunities",
-                        "Let's gratitude journal together",
-                        "Generate 5 creative writing prompts for me.",
-                        "Summarize a concept or book I wrote about recently",
-                        "Ask me a relevant thought-provoking question to journal about"
-                    ]
+                    'excluded_folders': []
                 }
                 
                 response = self.supabase.table('user_settings')\
@@ -59,7 +48,6 @@ class SettingsService:
             return {
                 'user_id': str(user_id),
                 'personal_info': '',
-                'memory': '',
                 'model': settings.OPENAI_MODEL
             }
 

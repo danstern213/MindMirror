@@ -42,11 +42,9 @@ export interface LinkedContext {
 
 export interface UserSettings {
   personal_info: string;
-  memory: string;
   model: string;
   openai_api_key?: string;
   excluded_folders: string[];
-  suggested_prompts: string[];
 }
 
 export interface FileUpload {

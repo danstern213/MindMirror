@@ -48,19 +48,6 @@ export function SettingsPanel() {
       </div>
 
       <div>
-        <h3 className="text-lg font-medium text-gray-900">Memory Context</h3>
-        <div className="mt-2">
-          <textarea
-            rows={4}
-            value={settings.memory}
-            onChange={(e) => updateSettings({ memory: e.target.value })}
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-            placeholder="Add memory context..."
-          />
-        </div>
-      </div>
-
-      <div>
         <h3 className="text-lg font-medium text-gray-900">OpenAI API Key</h3>
         <div className="mt-2">
           <input
@@ -85,45 +72,6 @@ export function SettingsPanel() {
             <option value="gpt-4">GPT-4</option>
             <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
           </select>
-        </div>
-      </div>
-
-      <div>
-        <h3 className="text-lg font-medium text-gray-900">Suggested Prompts</h3>
-        <div className="mt-2 space-y-2">
-          {settings.suggested_prompts.map((prompt, index) => (
-            <div key={index} className="flex items-center space-x-2">
-              <input
-                type="text"
-                value={prompt}
-                onChange={(e) => {
-                  const newPrompts = [...settings.suggested_prompts];
-                  newPrompts[index] = e.target.value;
-                  updateSettings({ suggested_prompts: newPrompts });
-                }}
-                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-              />
-              <button
-                onClick={() => {
-                  const newPrompts = settings.suggested_prompts.filter((_, i) => i !== index);
-                  updateSettings({ suggested_prompts: newPrompts });
-                }}
-                className="text-red-600 hover:text-red-700"
-              >
-                Remove
-              </button>
-            </div>
-          ))}
-          <button
-            onClick={() => {
-              updateSettings({
-                suggested_prompts: [...settings.suggested_prompts, '']
-              });
-            }}
-            className="text-indigo-600 hover:text-indigo-700 text-sm font-medium"
-          >
-            Add Prompt
-          </button>
         </div>
       </div>
     </div>

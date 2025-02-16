@@ -12,19 +12,8 @@ interface SettingsState {
 
 const DEFAULT_SETTINGS: UserSettings = {
   personal_info: '',
-  memory: '',
   model: 'gpt-4-0125-preview',
-  excluded_folders: [],
-  suggested_prompts: [
-    "What are three small wins I can aim for today?",
-    "Help me reflect on my day. What went well, and what could have gone better?",
-    "Write a draft of my weekly review for this week",
-    "Summarize me as a person, including my strengths and growth opportunities",
-    "Let's gratitude journal together",
-    "Generate 5 creative writing prompts for me.",
-    "Summarize a concept or book I wrote about recently",
-    "Ask me a relevant thought-provoking question to journal about"
-  ]
+  excluded_folders: []
 };
 
 export const useSettingsStore = create<SettingsState>((set) => ({
