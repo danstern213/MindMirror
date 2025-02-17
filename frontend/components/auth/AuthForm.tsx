@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { motion } from 'framer-motion';
-import { Logo } from '../common/Logo';
+import { Logo } from '@/components/common/Logo';
 
 export function AuthForm() {
   const [isLogin, setIsLogin] = useState(true);
