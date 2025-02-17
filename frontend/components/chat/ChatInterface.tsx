@@ -9,6 +9,7 @@ import { SettingsPanel } from '../settings/SettingsPanel';
 import { Dialog, Transition } from '@headlessui/react';
 import { Fragment } from 'react';
 import { Cog6ToothIcon } from '@heroicons/react/24/outline';
+import { Logo } from '@/components/common/Logo';
 
 // Processing status messages
 const PROCESSING_STATES = {
@@ -87,15 +88,15 @@ export function ChatInterface() {
   }
 
   return (
-    <div className="fixed inset-0 flex bg-white">
+    <div className="fixed inset-0 flex academia-container">
       {/* Sidebar */}
-      <div className="flex flex-col w-64 border-r">
-        <div className="p-4 border-b">
+      <div className="flex flex-col w-64 border-r border-[var(--primary-dark)]">
+        <div className="p-4 border-b border-[var(--primary-dark)]">
           <div className="flex items-center justify-between">
-            <h1 className="text-xl font-semibold text-gray-900">AI Note Copilot</h1>
+            <Logo />
             <button
               onClick={() => setSettingsOpen(true)}
-              className="p-2 text-gray-400 hover:text-gray-500 rounded-full hover:bg-gray-100"
+              className="p-2 text-[var(--primary-accent)] hover:text-[var(--primary-dark)] rounded-sm hover:bg-[var(--paper-texture)]"
             >
               <Cog6ToothIcon className="h-5 w-5" />
             </button>
@@ -119,24 +120,70 @@ export function ChatInterface() {
           <div className="max-w-4xl mx-auto">
             {currentThread ? (
               <>
-                {currentThread.messages.map((message, index) => (
-                  <ChatMessage 
-                    key={index} 
-                    message={message} 
-                    isStreaming={index === currentThread.messages.length - 1 && isStreaming}
-                  />
-                ))}
-                {processingStatus && (
-                  <div className="p-4 flex items-center justify-center">
-                    <div className="flex items-center space-x-2">
-                      <div className="animate-pulse h-2 w-2 rounded-full bg-indigo-500"></div>
-                      <div className="text-sm text-gray-500">{processingStatus}</div>
+                {currentThread.messages.length > 0 ? (
+                  <>
+                    {currentThread.messages.map((message, index) => (
+                      <ChatMessage 
+                        key={index} 
+                        message={message} 
+                        isStreaming={index === currentThread.messages.length - 1 && isStreaming}
+                      />
+                    ))}
+                    {processingStatus && (
+                      <div className="p-4 flex items-center justify-center">
+                        <div className="flex items-center space-x-2">
+                          <div className="animate-pulse h-2 w-2 rounded-full bg-[var(--primary-accent)]"></div>
+                          <div className="text-sm text-[var(--primary-dark)] font-serif">{processingStatus}</div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center px-4 py-16 text-center animate-fadeIn">
+                    <div className="w-24 h-24 mb-8 animate-float">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="w-full h-full text-[var(--primary-accent)]"
+                      >
+                        <path
+                          d="M4 19.5C4 18.837 4.26339 18.2011 4.73223 17.7322C5.20107 17.2634 5.83696 17 6.5 17H20"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M6.5 2H20V22H6.5C5.83696 22 5.20107 21.7366 4.73223 21.2678C4.26339 20.7989 4 20.163 4 19.5V4.5C4 3.83696 4.26339 3.20107 4.73223 2.73223C5.20107 2.26339 5.83696 2 6.5 2Z"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M8 7H16M8 11H16M8 15H12"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                    <h2 className="academia-heading mb-3">Ready to Explore Your Knowledge</h2>
+                    <p className="academia-text max-w-md mb-8">
+                      Start a conversation to uncover insights from your past writing. Ask questions, explore connections, and synthesize your knowledge.
+                    </p>
+                    <div className="flex flex-col gap-4 items-center">
+                      <p className="text-sm academia-text">
+                        Try asking: "What are the key themes in my recent notes? Be specific. and reference existing notes"
+                      </p>
                     </div>
                   </div>
                 )}
               </>
             ) : (
-              <div className="h-full flex items-center justify-center text-gray-500">
+              <div className="h-full flex items-center justify-center academia-text">
                 Select a chat or start a new one
               </div>
             )}
@@ -144,7 +191,7 @@ export function ChatInterface() {
         </div>
 
         {/* Input */}
-        <div className="border-t bg-white">
+        <div className="border-t border-[var(--primary-dark)] bg-[var(--paper-texture)]">
           <div className="max-w-4xl mx-auto">
             <ChatInput
               onSendMessage={sendMessage}
@@ -155,9 +202,9 @@ export function ChatInterface() {
       </div>
 
       {/* File upload sidebar */}
-      <div className="w-80 border-l bg-gray-50">
-        <div className="p-4 border-b">
-          <h2 className="text-lg font-medium text-gray-900">Documents</h2>
+      <div className="w-80 border-l border-[var(--primary-dark)] bg-[var(--paper-texture)]">
+        <div className="p-4 border-b border-[var(--primary-dark)]">
+          <h2 className="academia-heading">Documents</h2>
         </div>
         <div className="flex-1 overflow-y-auto">
           <FileUpload />
@@ -194,10 +241,10 @@ export function ChatInterface() {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-2xl transform overflow-hidden rounded-2xl bg-white p-6 shadow-xl transition-all">
+                <Dialog.Panel className="w-full max-w-2xl transform overflow-hidden academia-card shadow-xl transition-all">
                   <Dialog.Title
                     as="h3"
-                    className="text-lg font-medium leading-6 text-gray-900"
+                    className="academia-heading"
                   >
                     Settings
                   </Dialog.Title>

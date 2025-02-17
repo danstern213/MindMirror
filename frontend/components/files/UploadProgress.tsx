@@ -11,15 +11,15 @@ export function UploadProgress() {
   const getStatusColor = () => {
     switch (status) {
       case 'uploading':
-        return 'bg-blue-600';
+        return 'bg-[var(--primary-accent)]';
       case 'processing':
-        return 'bg-indigo-600';
+        return 'bg-[var(--primary-dark)]';
       case 'complete':
-        return 'bg-green-600';
+        return 'bg-[var(--primary-gold)]';
       case 'error':
-        return 'bg-red-600';
+        return 'bg-[#8B0000]'; // Dark red to match theme
       default:
-        return 'bg-gray-600';
+        return 'bg-[var(--primary-dark)]';
     }
   };
 
@@ -39,18 +39,18 @@ export function UploadProgress() {
   };
 
   return (
-    <div className="w-full">
+    <div className="w-full mt-4">
       <div className="flex justify-between mb-1">
-        <span className="text-sm font-medium text-gray-700">
+        <span className="text-sm font-serif text-[var(--primary-dark)]">
           {getStatusText()}
         </span>
-        <span className="text-sm font-medium text-gray-700">
+        <span className="text-sm font-serif text-[var(--primary-dark)]">
           {currentFileIndex + 1} of {totalFiles} ({progress}%)
         </span>
       </div>
-      <div className="w-full bg-gray-200 rounded-full h-2.5">
+      <div className="w-full bg-[var(--paper-texture)] border border-[var(--primary-dark)] rounded-sm h-2.5">
         <div
-          className={`h-2.5 rounded-full transition-all duration-300 ${getStatusColor()}`}
+          className={`h-2.5 rounded-sm transition-all duration-300 ${getStatusColor()}`}
           style={{ width: `${progress}%` }}
         ></div>
       </div>

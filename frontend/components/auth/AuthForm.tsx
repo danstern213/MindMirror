@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { motion } from 'framer-motion';
+import { Logo } from '@/components/common/Logo';
 
 export function AuthForm() {
   const [isLogin, setIsLogin] = useState(true);
@@ -48,26 +49,34 @@ export function AuthForm() {
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.6 }}
-        className="hidden lg:flex lg:w-2/5 bg-gradient-to-br from-indigo-600 via-purple-600 to-indigo-800 relative overflow-hidden"
+        className="hidden lg:flex lg:w-2/5 relative overflow-hidden"
       >
+        <div className="absolute inset-0 bg-[var(--primary-green)]" />
         <div className="absolute inset-0 bg-[url('/neural-pattern.svg')] opacity-10" />
+        <div 
+          className="absolute inset-0" 
+          style={{
+            backgroundImage: `linear-gradient(to right, rgba(222, 214, 200, 0.1) 1px, transparent 1px),
+              linear-gradient(to bottom, rgba(222, 214, 200, 0.1) 1px, transparent 1px)`,
+            backgroundSize: '20px 20px'
+          }}
+        />
         <div className="relative z-10 flex flex-col justify-between w-full p-12">
-          <div className="font-display">
-            <motion.h1 
+          <div className="font-serif">
+            <motion.div 
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3 }}
-              className="text-4xl font-bold text-white"
             >
-              AI Note Copilot
-            </motion.h1>
+              <Logo variant="light" className="mb-8" />
+            </motion.div>
             <motion.p 
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.4 }}
-              className="mt-4 text-xl text-white/80"
+              className="mt-4 text-xl text-white font-serif"
             >
-              Cultivate the knowledge that you already have.  Find it when you need it.
+              Cultivate the knowledge that you already have. Find it when you need it.
             </motion.p>
           </div>
           
@@ -78,16 +87,16 @@ export function AuthForm() {
             className="mt-auto"
           >
             <div className="flex space-x-4">
-              <div className="h-1 w-12 rounded-full bg-white/30" />
-              <div className="h-1 w-12 rounded-full bg-white" />
-              <div className="h-1 w-12 rounded-full bg-white/30" />
+              <div className="h-1 w-12 rounded-sm bg-white/30" />
+              <div className="h-1 w-12 rounded-sm bg-white" />
+              <div className="h-1 w-12 rounded-sm bg-white/30" />
             </div>
           </motion.div>
         </div>
       </motion.div>
 
       {/* Right Panel - Auth Forms */}
-      <div className="flex-1 flex flex-col justify-center px-4 sm:px-6 lg:px-20 bg-white">
+      <div className="flex-1 flex flex-col justify-center px-4 sm:px-6 lg:px-20 bg-[var(--paper-texture)]">
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -95,10 +104,10 @@ export function AuthForm() {
           className="max-w-md w-full mx-auto"
         >
           <div className="text-center mb-8">
-            <h2 className="font-display text-3xl font-bold text-gray-900">
+            <h2 className="font-serif text-3xl font-bold text-[var(--primary-dark)]">
               {isLogin ? 'Welcome back' : 'Create your account'}
             </h2>
-            <p className="mt-3 text-gray-600">
+            <p className="mt-3 text-[var(--primary-dark)] font-serif">
               {isLogin
                 ? 'Sign in to continue to your workspace'
                 : 'Start organizing your thoughts with BigBrain'}
@@ -107,7 +116,7 @@ export function AuthForm() {
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="email" className="block text-sm font-serif font-medium text-[var(--primary-dark)]">
                 Email address
               </label>
               <motion.div 
@@ -120,14 +129,14 @@ export function AuthForm() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="form-input block w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 ease-in-out"
+                  className="block w-full px-4 py-3 rounded-sm border border-[var(--primary-dark)] bg-[var(--paper-texture)] focus:ring-2 focus:ring-[var(--primary-green)] focus:border-transparent transition-all duration-200 ease-in-out font-serif"
                   placeholder="you@example.com"
                 />
               </motion.div>
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="password" className="block text-sm font-serif font-medium text-[var(--primary-dark)]">
                 Password
               </label>
               <motion.div 
@@ -140,7 +149,7 @@ export function AuthForm() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="form-input block w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 ease-in-out"
+                  className="block w-full px-4 py-3 rounded-sm border border-[var(--primary-dark)] bg-[var(--paper-texture)] focus:ring-2 focus:ring-[var(--primary-green)] focus:border-transparent transition-all duration-200 ease-in-out font-serif"
                   placeholder="••••••••"
                 />
               </motion.div>
@@ -150,9 +159,9 @@ export function AuthForm() {
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="p-4 rounded-lg bg-red-50 border border-red-100"
+                className="p-4 rounded-sm border border-[var(--primary-dark)] bg-[var(--paper-texture)]"
               >
-                <p className="text-sm text-red-600">{error}</p>
+                <p className="text-sm font-serif text-[var(--primary-dark)]">{error}</p>
               </motion.div>
             )}
 
@@ -160,7 +169,7 @@ export function AuthForm() {
               whileHover={{ scale: 1.01 }}
               whileTap={{ scale: 0.99 }}
               type="submit"
-              className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all duration-200 ease-in-out"
+              className="w-full flex justify-center py-3 px-4 border border-[var(--primary-green)] rounded-sm shadow-sm text-sm font-serif text-[var(--paper-texture)] bg-[var(--primary-green)] hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--primary-green)] transition-all duration-200 ease-in-out"
             >
               {isLogin ? 'Sign in' : 'Create account'}
             </motion.button>
@@ -169,7 +178,7 @@ export function AuthForm() {
               <button
                 type="button"
                 onClick={() => setIsLogin(!isLogin)}
-                className="text-sm text-indigo-600 hover:text-indigo-500 font-medium focus:outline-none focus:underline transition-colors duration-200"
+                className="text-sm text-[var(--primary-green)] hover:opacity-90 font-serif font-medium focus:outline-none focus:underline transition-colors duration-200"
               >
                 {isLogin ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
               </button>
@@ -179,10 +188,10 @@ export function AuthForm() {
           <div className="mt-8">
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-200" />
+                <div className="w-full border-t border-[var(--primary-dark)]" />
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">
+                <span className="px-2 bg-[var(--paper-texture)] text-[var(--primary-dark)] font-serif">
                   Secured by BigBrain
                 </span>
               </div>

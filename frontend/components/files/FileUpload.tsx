@@ -204,22 +204,24 @@ export function FileUpload() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-4 border-b">
-        <h2 className="text-lg font-medium text-gray-900">
-          Documents ({totalFiles ?? 0} uploaded)
-        </h2>
+      <div className="p-4">
+        <div className="flex flex-col">
+          <h2 className="text-lg font-serif font-semibold text-[var(--primary-dark)]">
+            {totalFiles ?? 0} files uploaded
+          </h2>
+        </div>
       </div>
 
       <div className="flex-1 p-4">
         {error && !error.includes('already exists') && (
-          <div className="rounded-md bg-red-50 p-4 mb-4">
+          <div className="rounded-sm border border-[var(--primary-dark)] bg-[var(--paper-texture)] p-4 mb-4">
             <div className="flex">
               <div className="flex-shrink-0">
-                <XCircleIcon className="h-5 w-5 text-red-400" aria-hidden="true" />
+                <XCircleIcon className="h-5 w-5 text-[var(--primary-accent)]" aria-hidden="true" />
               </div>
               <div className="ml-3">
-                <h3 className="text-sm font-medium text-red-800">Upload Error</h3>
-                <div className="mt-2 text-sm text-red-700">
+                <h3 className="text-sm font-serif font-medium text-[var(--primary-dark)]">Upload Error</h3>
+                <div className="mt-2 text-sm academia-text">
                   <p>{error}</p>
                 </div>
               </div>
@@ -228,12 +230,12 @@ export function FileUpload() {
         )}
 
         <div
-          className={`relative border-2 border-dashed rounded-lg p-6 ${
+          className={`relative border-2 border-dashed rounded-sm p-6 ${
             dragActive
-              ? 'border-indigo-500 bg-indigo-50'
+              ? 'border-[var(--primary-accent)] bg-[var(--paper-texture)]'
               : error
-              ? 'border-red-300 hover:border-red-400'
-              : 'border-gray-300 hover:border-gray-400'
+              ? 'border-[var(--primary-dark)] hover:border-[var(--primary-accent)]'
+              : 'border-[var(--primary-dark)] hover:border-[var(--primary-accent)]'
           }`}
           onDragEnter={handleDrag}
           onDragLeave={handleDrag}
@@ -250,34 +252,29 @@ export function FileUpload() {
           />
 
           <div className="text-center">
-            <DocumentPlusIcon className="mx-auto h-12 w-12 text-gray-400" />
+            <DocumentPlusIcon
+              className="mx-auto h-12 w-12 text-[var(--primary-green)]"
+              aria-hidden="true"
+            />
             <div className="mt-4">
               <button
                 type="button"
-                disabled={uploading}
-                onClick={() => {
-                  clearError();
-                  inputRef.current?.click();
-                }}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => inputRef.current?.click()}
+                className="inline-flex items-center px-4 py-2 border border-[var(--primary-green)] rounded-sm shadow-sm text-sm font-serif text-[var(--paper-texture)] bg-[var(--primary-green)] hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--primary-green)]"
               >
-                {uploading ? 'Uploading...' : 'Select files'}
+                <span>Select files</span>
               </button>
             </div>
-            <p className="mt-2 text-sm text-gray-500">
-              or drag and drop files here
+            <p className="mt-2 text-sm academia-text">
+              or drag and drop
             </p>
-            <p className="mt-1 text-xs text-gray-500">
-              Supported formats: .txt, .pdf, .md, .doc, .docx (max 10MB)
-              <br />
-              Empty files will be saved without content
+            <p className="mt-1 text-xs academia-text">
+              PDF, TXT, MD, DOC, DOCX up to 10MB each
             </p>
-          </div>
-
-          <div className="mt-4">
-            <UploadProgress />
           </div>
         </div>
+
+        {uploading && <UploadProgress />}
       </div>
     </div>
   );

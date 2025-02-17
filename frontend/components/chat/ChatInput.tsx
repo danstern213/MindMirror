@@ -33,7 +33,7 @@ export function ChatInput({ onSendMessage, disabled = false }: ChatInputProps) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="p-4 border-t bg-white">
+    <form onSubmit={handleSubmit} className="p-4">
       <div className="max-w-4xl mx-auto flex items-end space-x-4">
         <div className="flex-1">
           <textarea
@@ -43,14 +43,14 @@ export function ChatInput({ onSendMessage, disabled = false }: ChatInputProps) {
             onKeyDown={handleKeyDown}
             placeholder="Type your message..."
             rows={1}
-            className="block w-full resize-none rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+            className="block w-full resize-none rounded-sm border-[var(--primary-dark)] bg-[var(--paper-texture)] shadow-sm focus:border-[var(--primary-accent)] focus:ring-[var(--primary-accent)] sm:text-sm font-serif"
             disabled={disabled}
           />
         </div>
         <button
           type="submit"
           disabled={!message.trim() || disabled}
-          className="inline-flex items-center rounded-lg border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center px-4 py-2 border border-[var(--primary-green)] rounded-sm shadow-sm text-sm font-serif text-[var(--paper-texture)] bg-[var(--primary-green)] hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--primary-green)] disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <PaperAirplaneIcon className="h-4 w-4" />
         </button>

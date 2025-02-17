@@ -4,44 +4,73 @@
 
 :root {
   --primary-blue: #635bff;
-  --primary-dark: #0a2540;
+  --primary-dark: #1a1a1a;
+  --primary-accent: #8b7355;
+  --primary-gold: #b8860b;
+  --primary-green: #004225;
   --primary-gradient-start: #7a73ff;
   --primary-gradient-end: #635bff;
-  --background-light: #fff;
-  --text-primary: #0a2540;
-  --text-secondary: #425466;
-  --border-color: #e6e8eb;
+  --background-dark: #1c1c1c;
+  --background-light: #f5f5f0;
+  --text-primary: #1a1a1a;
+  --text-secondary: #4a4a4a;
+  --border-color: #3a3a3a;
+  --paper-texture: #f8f6f0;
 }
 
 @layer base {
   body {
-    @apply antialiased text-[#0a2540] bg-white;
+    @apply antialiased text-[#1a1a1a] bg-[var(--paper-texture)];
   }
 
   h1 {
-    @apply text-4xl font-bold tracking-tight;
+    @apply text-4xl font-bold tracking-tight font-serif;
   }
 
   h2 {
-    @apply text-3xl font-semibold tracking-tight;
+    @apply text-3xl font-semibold tracking-tight font-serif;
   }
 }
 
 @layer components {
   .btn-primary {
-    @apply bg-[#635bff] hover:bg-[#0a2540] text-white font-semibold py-3 px-6 rounded-full transition-all duration-200 ease-in-out;
+    @apply bg-[var(--primary-accent)] hover:bg-[var(--primary-green)] text-[var(--paper-texture)] font-serif py-3 px-6 rounded-sm border border-[var(--primary-accent)] transition-all duration-200 ease-in-out;
   }
 
   .btn-secondary {
-    @apply bg-white hover:bg-gray-50 text-[#0a2540] font-semibold py-3 px-6 rounded-full border border-gray-200 transition-all duration-200 ease-in-out;
+    @apply bg-[var(--paper-texture)] hover:bg-gray-100 text-[var(--primary-accent)] font-serif py-3 px-6 rounded-sm border border-[var(--primary-accent)] transition-all duration-200 ease-in-out;
   }
 
   .input-field {
-    @apply w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#635bff] focus:border-transparent transition-all duration-200 ease-in-out;
+    @apply w-full px-4 py-3 rounded-sm border border-[var(--primary-dark)] bg-[var(--paper-texture)] focus:ring-2 focus:ring-[var(--primary-accent)] focus:border-transparent transition-all duration-200 ease-in-out font-serif;
   }
 
   .card {
-    @apply bg-white rounded-2xl shadow-sm border border-gray-100 p-8;
+    @apply bg-[var(--paper-texture)] rounded-sm shadow-md border border-[var(--primary-dark)] p-8;
+  }
+
+  .academia-card {
+    @apply bg-[var(--paper-texture)] rounded-sm border border-[var(--primary-dark)] p-6 shadow-lg;
+    background-image: 
+      linear-gradient(to right, rgba(222, 214, 200, 0.1) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(222, 214, 200, 0.1) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+
+  .vintage-border {
+    @apply border-2 border-[var(--primary-dark)] p-1;
+    position: relative;
+  }
+
+  .vintage-border::after {
+    content: '';
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    right: -4px;
+    bottom: -4px;
+    border: 1px solid var(--primary-accent);
+    z-index: -1;
   }
 
   .gradient-text {
@@ -130,4 +159,25 @@
 
 .animate-fadeIn {
   animation: fadeIn 0.5s ease-in-out;
+}
+
+/* Dark Academia specific utilities */
+.academia-text {
+  @apply font-serif text-[var(--primary-dark)];
+}
+
+.academia-heading {
+  @apply font-serif font-bold text-[var(--primary-dark)] border-b-2 border-[var(--primary-accent)] pb-2;
+}
+
+.academia-link {
+  @apply text-[var(--primary-accent)] hover:text-[var(--primary-dark)] underline decoration-2 underline-offset-4 transition-colors duration-200;
+}
+
+.academia-container {
+  background-color: var(--paper-texture);
+  background-image: 
+    linear-gradient(to right, rgba(222, 214, 200, 0.2) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(222, 214, 200, 0.2) 1px, transparent 1px);
+  background-size: 20px 20px;
 } 

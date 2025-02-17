@@ -18,7 +18,7 @@ const processBracketedText = (text: string) => {
     if (part.startsWith('[[') && part.endsWith(']]')) {
       const innerText = part.slice(2, -2);
       return (
-        <span key={index} className="font-medium text-indigo-600">
+        <span key={index} className="font-medium text-[var(--primary-accent)]">
           {innerText}
         </span>
       );
@@ -58,47 +58,47 @@ export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) 
   const hasSources = !isStreaming && message.sources && message.sources.length > 0;
 
   return (
-    <div className={`py-4 ${isAssistant ? 'bg-gray-50' : 'bg-white'}`}>
+    <div className={`py-4 ${isAssistant ? 'bg-[var(--paper-texture)] border-y border-[var(--primary-dark)]' : ''}`}>
       <div className="max-w-4xl mx-auto px-4">
         <div className="flex items-start">
-          <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-            isAssistant ? 'bg-indigo-500' : 'bg-gray-300'
+          <div className={`flex-shrink-0 w-8 h-8 rounded-sm flex items-center justify-center ${
+            isAssistant ? 'bg-[var(--primary-green)]' : 'bg-[var(--primary-accent)]'
           }`}>
-            <span className="text-white text-sm font-medium">
+            <span className="text-[var(--paper-texture)] text-sm font-serif">
               {isAssistant ? 'AI' : 'U'}
             </span>
           </div>
           <div className="ml-4 flex-1">
-            <div className="prose prose-indigo max-w-none">
+            <div className="prose prose-stone max-w-none">
               <ReactMarkdown
                 components={{
                   p: ({ children, ...props }) => (
-                    <MarkdownElement tag="p" className="my-3 text-gray-700" {...props}>
+                    <MarkdownElement tag="p" className="my-3 academia-text" {...props}>
                       {children}
                     </MarkdownElement>
                   ),
                   h1: ({ children, ...props }) => (
-                    <MarkdownElement tag="h1" className="text-3xl font-bold mt-8 mb-4 text-gray-900" {...props}>
+                    <MarkdownElement tag="h1" className="academia-heading mt-8 mb-4" {...props}>
                       {children}
                     </MarkdownElement>
                   ),
                   h2: ({ children, ...props }) => (
-                    <MarkdownElement tag="h2" className="text-2xl font-bold mt-6 mb-3 text-gray-900" {...props}>
+                    <MarkdownElement tag="h2" className="academia-heading mt-6 mb-3" {...props}>
                       {children}
                     </MarkdownElement>
                   ),
                   h3: ({ children, ...props }) => (
-                    <MarkdownElement tag="h3" className="text-xl font-bold mt-5 mb-2 text-gray-900" {...props}>
+                    <MarkdownElement tag="h3" className="academia-heading mt-5 mb-2" {...props}>
                       {children}
                     </MarkdownElement>
                   ),
                   ul: ({ children }) => (
-                    <ul className="list-disc list-outside pl-5 my-4 space-y-2 text-gray-700">
+                    <ul className="list-disc list-outside pl-5 my-4 space-y-2 academia-text">
                       {children}
                     </ul>
                   ),
                   ol: ({ children }) => (
-                    <ol className="list-decimal list-outside pl-5 my-4 space-y-2 text-gray-700">
+                    <ol className="list-decimal list-outside pl-5 my-4 space-y-2 academia-text">
                       {children}
                     </ol>
                   ),
@@ -108,12 +108,12 @@ export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) 
                     </MarkdownElement>
                   ),
                   a: ({ href, children }) => (
-                    <a href={href} className="text-indigo-600 hover:text-indigo-700 font-medium">
+                    <a href={href} className="academia-link">
                       {children}
                     </a>
                   ),
                   strong: ({ children }) => (
-                    <strong className="font-bold text-gray-900">
+                    <strong className="font-bold text-[var(--primary-dark)]">
                       {children}
                     </strong>
                   ),
@@ -123,18 +123,18 @@ export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) 
                     </em>
                   ),
                   blockquote: ({ children }) => (
-                    <blockquote className="border-l-4 border-indigo-200 pl-4 my-4 italic text-gray-700">
+                    <blockquote className="border-l-4 border-[var(--primary-accent)] pl-4 my-4 italic academia-text">
                       {children}
                     </blockquote>
                   ),
                   code: ({ className, children }) => {
                     const isInline = !className;
                     return isInline ? (
-                      <code className="bg-gray-100 rounded px-1.5 py-0.5 font-mono text-sm text-gray-800">
+                      <code className="bg-[var(--paper-texture)] border border-[var(--primary-dark)] rounded-sm px-1.5 py-0.5 font-mono text-sm text-[var(--primary-dark)]">
                         {children}
                       </code>
                     ) : (
-                      <code className="block bg-gray-100 rounded p-3 my-3 whitespace-pre-wrap font-mono text-sm text-gray-800 overflow-x-auto">
+                      <code className="block bg-[var(--paper-texture)] border border-[var(--primary-dark)] rounded-sm p-3 my-3 whitespace-pre-wrap font-mono text-sm text-[var(--primary-dark)] overflow-x-auto">
                         {children}
                       </code>
                     );
@@ -148,7 +148,7 @@ export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) 
               <Disclosure as="div" className="mt-4">
                 {({ open }) => (
                   <>
-                    <Disclosure.Button className="flex items-center text-sm text-gray-500 hover:text-gray-700">
+                    <Disclosure.Button className="flex items-center text-sm academia-text hover:text-[var(--primary-accent)]">
                       <ChevronUpIcon
                         className={`${open ? 'transform rotate-180' : ''} w-4 h-4 mr-1`}
                       />
@@ -159,16 +159,16 @@ export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) 
                         {message.sources!.map((source, index) => (
                           <div
                             key={index}
-                            className="text-sm bg-white p-3 rounded-lg border border-gray-200"
+                            className="text-sm academia-card"
                           >
-                            <div className="font-medium text-gray-900">
+                            <div className="font-serif font-medium text-[var(--primary-dark)]">
                               {source.title}
                             </div>
-                            <div className="mt-1 text-gray-500">
+                            <div className="mt-1 academia-text">
                               Relevance: {(source.score * 100).toFixed(1)}%
                             </div>
                             {source.matched_keywords && source.matched_keywords.length > 0 && (
-                              <div className="mt-1 text-gray-500">
+                              <div className="mt-1 academia-text">
                                 Matched terms: {source.matched_keywords.join(', ')}
                               </div>
                             )}

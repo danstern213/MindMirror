@@ -1,6 +1,6 @@
 'use client';
 
-import { Inter } from 'next/font/google';
+import { Inter, Playfair_Display } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { Toaster } from 'react-hot-toast';
@@ -11,23 +11,30 @@ const inter = Inter({
   variable: '--font-inter',
 });
 
+const playfair = Playfair_Display({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-playfair',
+});
+
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${inter.variable} h-full antialiased`}>
+    <html lang="en" className={`${inter.variable} ${playfair.variable} h-full antialiased`}>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>AI Note Copilot</title>
         <meta
           name="description"
-          content="Your personal knowledge companion"
+          content="Your scholarly companion for knowledge exploration"
         />
-        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="48x48" />
+        <link rel="icon" href="/favicon.ico" sizes="48x48" />
       </head>
-      <body className="h-screen overflow-hidden bg-gradient-to-b from-white to-gray-50">
+      <body className="h-screen overflow-hidden academia-container">
         <AuthProvider>
           <div className="h-full">
             <main className="relative h-full">
@@ -38,9 +45,11 @@ export default function RootLayout({
               toastOptions={{
                 duration: 3000,
                 style: {
-                  background: '#fff',
-                  color: '#363636',
-                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                  background: 'var(--paper-texture)',
+                  color: 'var(--primary-dark)',
+                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -1px rgba(0, 0, 0, 0.1)',
+                  border: '1px solid var(--primary-dark)',
+                  fontFamily: 'var(--font-playfair), serif',
                 },
               }}
               containerStyle={{
