@@ -18,7 +18,11 @@ const processBracketedText = (text: string) => {
     if (part.startsWith('[[') && part.endsWith(']]')) {
       const innerText = part.slice(2, -2);
       return (
-        <span key={index} className="font-medium text-[var(--primary-accent)]">
+        <span 
+          key={index} 
+          className="text-[var(--primary-accent)]"
+          style={{ fontSize: 'inherit', fontWeight: 'inherit', fontFamily: 'inherit' }}
+        >
           {innerText}
         </span>
       );
@@ -33,22 +37,21 @@ const MarkdownElement = ({ tag: Tag, className, children }: { tag: any, classNam
     if (typeof child === 'string') {
       return processBracketedText(child);
     }
-    if (React.isValidElement(child) && child.props) {
-      const props = { ...child.props };
-      if (props.children) {
-        props.children = processChildren(props.children);
-      }
-      return React.cloneElement(child, props);
+    if (React.isValidElement(child)) {
+      return React.cloneElement(child, {
+        ...child.props,
+        children: processChildren(child.props.children)
+      });
+    }
+    if (Array.isArray(child)) {
+      return child.map((c, i) => <React.Fragment key={i}>{processChildren(c)}</React.Fragment>);
     }
     return child;
   };
 
   return (
     <Tag className={className}>
-      {Array.isArray(children) 
-        ? children.map((child, index) => <React.Fragment key={index}>{processChildren(child)}</React.Fragment>)
-        : processChildren(children)
-      }
+      {processChildren(children)}
     </Tag>
   );
 };

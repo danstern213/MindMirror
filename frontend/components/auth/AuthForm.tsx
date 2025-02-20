@@ -12,19 +12,28 @@ declare global {
           initialize: (config: any) => void;
           renderButton: (element: HTMLElement, config: any) => void;
           prompt: () => void;
+          cancel: () => void;
         };
       };
     };
   }
 }
 
-export function AuthForm() {
-  const [isLogin, setIsLogin] = useState(true);
+interface AuthFormProps {
+  initialMode?: boolean;
+}
+
+export function AuthForm({ initialMode = true }: AuthFormProps) {
+  const [isLogin, setIsLogin] = useState(initialMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const { login, signup } = useAuth();
   const googleButtonRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setIsLogin(initialMode);
+  }, [initialMode]);
 
   useEffect(() => {
     // Load the Google Identity Services script
@@ -34,8 +43,12 @@ export function AuthForm() {
     script.defer = true;
     document.body.appendChild(script);
 
+    let mounted = true;
+
     script.onload = () => {
-      if (window.google && googleButtonRef.current) {
+      if (!mounted || !window.google || !googleButtonRef.current) return;
+
+      try {
         window.google.accounts.id.initialize({
           client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!,
           callback: handleGoogleSignIn,
@@ -53,10 +66,14 @@ export function AuthForm() {
           height: 48,
           shape: 'rectangular',
         });
+      } catch (err) {
+        console.error('Error initializing Google Sign-In:', err);
       }
     };
 
     return () => {
+      mounted = false;
+      // Remove the script tag
       const scriptElement = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
       if (scriptElement && scriptElement.parentNode) {
         scriptElement.parentNode.removeChild(scriptElement);
@@ -73,7 +90,10 @@ export function AuthForm() {
         token: response.credential,
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase Google sign-in error:', error);
+        throw error;
+      }
 
       // The session will be automatically handled by the AuthContext
       console.log('Google sign-in successful:', data);
@@ -88,12 +108,14 @@ export function AuthForm() {
     setError('');
     
     try {
+      console.log('Attempting', isLogin ? 'login' : 'signup', 'with email:', email);
       if (isLogin) {
         await login(email, password);
       } else {
         await signup(email, password);
       }
     } catch (err: any) {
+      console.error('Email auth error:', err);
       setError(err.message || 'An error occurred during authentication');
     }
   };

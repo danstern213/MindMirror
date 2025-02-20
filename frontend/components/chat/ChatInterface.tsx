@@ -34,7 +34,7 @@ export function ChatInterface() {
     sendMessage
   } = useChatStore();
 
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Auto-create thread when no threads exist
@@ -250,10 +250,20 @@ export function ChatInterface() {
                   <div className="mt-4">
                     <SettingsPanel />
                   </div>
-                  <div className="mt-6">
+                  <div className="mt-6 flex justify-between items-center px-4 pb-4">
                     <button
                       type="button"
-                      className="inline-flex justify-center rounded-md border border-transparent bg-indigo-100 px-4 py-2 text-sm font-medium text-indigo-900 hover:bg-indigo-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+                      className="inline-flex justify-center rounded-sm border border-[var(--primary-dark)] px-4 py-2 text-sm font-serif text-[var(--primary-dark)] hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[var(--primary-green)] focus:ring-offset-2"
+                      onClick={async () => {
+                        await logout();
+                        setSettingsOpen(false);
+                      }}
+                    >
+                      Logout
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex justify-center rounded-sm border border-[var(--primary-green)] px-4 py-2 text-sm font-serif text-[var(--paper-texture)] bg-[var(--primary-green)] hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[var(--primary-green)] focus:ring-offset-2"
                       onClick={() => setSettingsOpen(false)}
                     >
                       Close

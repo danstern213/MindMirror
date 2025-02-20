@@ -3,20 +3,22 @@ import React from 'react';
 interface LogoProps {
   variant?: 'light' | 'dark';
   className?: string;
+  size?: 'small' | 'large';
 }
 
-export function Logo({ variant = 'dark', className = '' }: LogoProps) {
-  const textColor = variant === 'light' ? 'text-white' : 'text-[var(--primary-dark)]';
-  
+export function Logo({ variant = 'dark', className = '', size = 'small' }: LogoProps) {
+  const iconSize = size === 'large' ? 56 : 32;
+  const textSize = size === 'large' ? 'text-3xl' : 'text-lg';
+
   return (
-    <div className={`flex items-center space-x-2 ${className}`}>
+    <div className={`flex items-center space-x-3 ${className}`}>
       <svg
-        width="32"
-        height="32"
+        width={iconSize}
+        height={iconSize}
         viewBox="0 0 24 24"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
-        className={`${variant === 'light' ? 'text-white' : 'text-[var(--primary-dark)]'}`}
+        className={`${variant === 'light' ? 'text-white' : 'text-[var(--primary-green)]'}`}
       >
         {/* Connection lines - square pattern with diagonals */}
         <path
@@ -45,7 +47,7 @@ export function Logo({ variant = 'dark', className = '' }: LogoProps) {
         <circle cx="9" cy="12" r="1.1" fill="none" stroke="currentColor" strokeWidth="0.8" />
         <circle cx="15" cy="12" r="1.1" fill="none" stroke="currentColor" strokeWidth="0.8" />
       </svg>
-      <span className={`font-serif font-bold text-lg leading-tight ${textColor}`}>
+      <span className={`font-serif font-bold ${textSize} leading-tight ${variant === 'light' ? 'text-white' : 'text-[var(--primary-dark)]'}`}>
         AI Note Copilot
       </span>
     </div>

@@ -4,6 +4,7 @@ import { Inter, Playfair_Display } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { Toaster } from 'react-hot-toast';
+import { usePathname } from 'next/navigation';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -22,8 +23,12 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
+  const isLandingPage = pathname === '/';
+  const isAuthPage = pathname === '/auth';
+
   return (
-    <html lang="en" className={`${inter.variable} ${playfair.variable} h-full antialiased`}>
+    <html lang="en" className={`${inter.variable} ${playfair.variable} ${!isLandingPage ? 'h-full' : ''} antialiased`}>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>AI Note Copilot</title>
@@ -34,10 +39,10 @@ export default function RootLayout({
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="48x48" />
         <link rel="icon" href="/favicon.ico" sizes="48x48" />
       </head>
-      <body className="h-screen overflow-hidden academia-container">
+      <body className={`academia-container ${!isLandingPage && !isAuthPage ? 'h-screen overflow-hidden' : ''}`}>
         <AuthProvider>
-          <div className="h-full">
-            <main className="relative h-full">
+          <div className={`${!isLandingPage && !isAuthPage ? 'h-full' : ''}`}>
+            <main className={`relative ${!isLandingPage && !isAuthPage ? 'h-full' : ''}`}>
               {children}
             </main>
             <Toaster 
