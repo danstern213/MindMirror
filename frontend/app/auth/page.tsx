@@ -3,9 +3,9 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { AuthForm } from '@/components/auth/AuthForm';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, Suspense } from 'react';
 
-export default function AuthPage() {
+function AuthContent() {
   const { user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -30,5 +30,17 @@ export default function AuthPage() {
     <div className="min-h-screen">
       <AuthForm initialMode={isLogin} />
     </div>
+  );
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex h-screen items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--primary-green)]"></div>
+      </div>
+    }>
+      <AuthContent />
+    </Suspense>
   );
 } 
