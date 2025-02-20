@@ -1,7 +1,22 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { motion } from 'framer-motion';
-import { Logo } from '@/components/common/Logo';
+import { Logo } from '../common/Logo';
+import { supabase } from '@/lib/supabase';
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (config: any) => void;
+          renderButton: (element: HTMLElement, config: any) => void;
+          prompt: () => void;
+        };
+      };
+    };
+  }
+}
 
 export function AuthForm() {
   const [isLogin, setIsLogin] = useState(true);
@@ -9,35 +24,76 @@ export function AuthForm() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const { login, signup } = useAuth();
+  const googleButtonRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Load the Google Identity Services script
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    document.body.appendChild(script);
+
+    script.onload = () => {
+      if (window.google && googleButtonRef.current) {
+        window.google.accounts.id.initialize({
+          client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!,
+          callback: handleGoogleSignIn,
+          auto_select: false,
+          cancel_on_tap_outside: true,
+        });
+
+        window.google.accounts.id.renderButton(googleButtonRef.current, {
+          type: 'standard',
+          theme: 'outline',
+          size: 'large',
+          text: 'continue_with',
+          width: googleButtonRef.current.offsetWidth,
+          logo_alignment: 'left',
+          height: 48,
+          shape: 'rectangular',
+        });
+      }
+    };
+
+    return () => {
+      const scriptElement = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
+      if (scriptElement && scriptElement.parentNode) {
+        scriptElement.parentNode.removeChild(scriptElement);
+      }
+    };
+  }, []);
+
+  const handleGoogleSignIn = async (response: any) => {
+    try {
+      setError('');
+      // The response contains the credential in response.credential
+      const { data, error } = await supabase.auth.signInWithIdToken({
+        provider: 'google',
+        token: response.credential,
+      });
+
+      if (error) throw error;
+
+      // The session will be automatically handled by the AuthContext
+      console.log('Google sign-in successful:', data);
+    } catch (err: any) {
+      console.error('Google sign-in error:', err);
+      setError(err.message || 'An error occurred during Google sign-in');
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     
-    console.log('Form submission started:', {
-      mode: isLogin ? 'login' : 'signup',
-      email,
-      passwordLength: password.length
-    });
-
     try {
       if (isLogin) {
-        console.log('Attempting login...');
         await login(email, password);
-        console.log('Login attempt completed');
       } else {
-        console.log('Attempting signup...');
         await signup(email, password);
-        console.log('Signup attempt completed');
       }
     } catch (err: any) {
-      console.error('Auth form submission error:', {
-        message: err.message,
-        status: err.status,
-        name: err.name,
-        supabaseError: err.error,
-        supabaseErrorDescription: err.error_description
-      });
       setError(err.message || 'An error occurred during authentication');
     }
   };
@@ -112,6 +168,23 @@ export function AuthForm() {
                 ? 'Sign in to continue to your workspace'
                 : 'Start organizing your thoughts with BigBrain'}
             </p>
+          </div>
+
+          {/* Google Sign In Button */}
+          <div 
+            ref={googleButtonRef}
+            className="w-full mb-6 px-4 [&>div]:w-full [&>div>div]:w-full [&>div>div>iframe]:!w-full"
+          />
+
+          <div className="relative mb-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-[var(--primary-dark)]" />
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-2 bg-[var(--paper-texture)] text-[var(--primary-dark)] font-serif">
+                Or continue with email
+              </span>
+            </div>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">

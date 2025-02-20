@@ -9,7 +9,7 @@ import { SettingsPanel } from '../settings/SettingsPanel';
 import { Dialog, Transition } from '@headlessui/react';
 import { Fragment } from 'react';
 import { Cog6ToothIcon } from '@heroicons/react/24/outline';
-import { Logo } from '@/components/common/Logo';
+import { Logo } from '../common/Logo';
 
 // Processing status messages
 const PROCESSING_STATES = {
