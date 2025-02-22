@@ -32,6 +32,7 @@ class UploadService:
 
     def _extract_text_from_pdf(self, content: bytes) -> str:
         """Extract text from PDF content."""
+        pdf_file = None
         try:
             pdf_file = BytesIO(content)
             pdf_reader = PdfReader(pdf_file)
@@ -45,9 +46,14 @@ class UploadService:
                 status_code=422,
                 detail=f"Error extracting text from PDF: {str(e)}"
             )
+        finally:
+            if pdf_file:
+                pdf_file.close()
+                del pdf_file
 
     def _extract_text_from_docx(self, content: bytes) -> str:
         """Extract text from DOCX content."""
+        docx_file = None
         try:
             docx_file = BytesIO(content)
             doc = docx.Document(docx_file)
@@ -62,6 +68,10 @@ class UploadService:
                 status_code=422,
                 detail=f"Error extracting text from DOCX: {str(e)}"
             )
+        finally:
+            if docx_file:
+                docx_file.close()
+                del docx_file
 
     def _extract_text_from_binary(self, content: bytes, filename: str) -> str:
         """Extract text from binary file formats."""
@@ -169,6 +179,7 @@ class UploadService:
         api_key: Optional[str] = None
     ) -> FileUploadResponse:
         """Save file to storage and generate embeddings."""
+        content = None
         try:
             logger.info(f"Starting file upload process for: {file.filename}")
             logger.info(f"User ID: {user_id}")
@@ -185,7 +196,7 @@ class UploadService:
                     embedding_status="skipped_duplicate"
                 )
             
-            # Validate file
+            # Read file content
             content = await file.read()
             content_size = len(content)
             logger.info(f"File size: {content_size} bytes")
@@ -203,7 +214,7 @@ class UploadService:
             except HTTPException as e:
                 logger.error(f"File extension validation failed: {str(e)}")
                 raise
-            
+
             # Create unique filename
             file_id = uuid4()
             sanitized_filename = self._sanitize_filename(file.filename)
@@ -284,6 +295,9 @@ class UploadService:
                                 detail="File content must be valid UTF-8 text"
                             )
 
+                    # Clear content from memory after text extraction
+                    del content
+                    
                     try:
                         await self.embedding_service.generate_and_save_embedding(
                             text_content,
@@ -291,6 +305,9 @@ class UploadService:
                             str(user_id),
                             api_key
                         )
+                        # Clear text content from memory after embedding generation
+                        del text_content
+                        
                         logger.info("Successfully generated embeddings")
                         embedding_status = "completed"
                         
@@ -326,6 +343,12 @@ class UploadService:
                     self.supabase.table('files').update({
                         'status': 'error'
                     }).eq('id', file_record.id).execute()
+                finally:
+                    # Ensure content is cleared even if there are errors
+                    if 'content' in locals():
+                        del content
+                    if 'text_content' in locals():
+                        del text_content
 
             return FileUploadResponse(
                 file_id=file_record.id,
@@ -343,6 +366,10 @@ class UploadService:
                 status_code=500,
                 detail=f"An unexpected error occurred while processing the file: {str(e)}"
             )
+        finally:
+            # Final cleanup
+            if 'content' in locals():
+                del content
 
     async def get_user_files(self, user_id: UUID) -> List[FileDB]:
         """Fetch the list of files for a user."""

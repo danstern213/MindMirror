@@ -64,6 +64,7 @@ async def upload_file(
             logger.debug(f"- {header}: {value}")
         
         # Read and log file size
+        content = None
         try:
             content = await file.read()
             file_size = len(content)
@@ -93,13 +94,16 @@ async def upload_file(
                         status_code=422,
                         detail="File content must be valid UTF-8 text"
                     )
-                
         except Exception as e:
             logger.error(f"Error reading file content: {str(e)}")
             raise HTTPException(
                 status_code=422,
                 detail=f"Error reading file content: {str(e)}"
             )
+        finally:
+            # Clear content after validation
+            if content:
+                del content
 
         # Log form data
         form = await request.form()
@@ -119,6 +123,9 @@ async def upload_file(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Error processing upload: {str(e)}"
             )
+        finally:
+            # Ensure file is closed
+            await file.close()
             
     except HTTPException:
         raise
