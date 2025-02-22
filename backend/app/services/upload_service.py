@@ -10,6 +10,9 @@ from .embedding_service import EmbeddingService
 from ..models.file import FileCreate, FileDB, FileUploadResponse
 from ..core.config import get_settings
 import logging
+from io import BytesIO
+from PyPDF2 import PdfReader
+import docx
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -26,6 +29,52 @@ class UploadService:
             settings.SUPABASE_KEY
         )
         self.embedding_service = embedding_service or EmbeddingService(self.supabase)
+
+    def _extract_text_from_pdf(self, content: bytes) -> str:
+        """Extract text from PDF content."""
+        try:
+            pdf_file = BytesIO(content)
+            pdf_reader = PdfReader(pdf_file)
+            text = []
+            for page in pdf_reader.pages:
+                text.append(page.extract_text())
+            return "\n".join(text)
+        except Exception as e:
+            logger.error(f"Error extracting text from PDF: {str(e)}")
+            raise HTTPException(
+                status_code=422,
+                detail=f"Error extracting text from PDF: {str(e)}"
+            )
+
+    def _extract_text_from_docx(self, content: bytes) -> str:
+        """Extract text from DOCX content."""
+        try:
+            docx_file = BytesIO(content)
+            doc = docx.Document(docx_file)
+            text = []
+            for paragraph in doc.paragraphs:
+                if paragraph.text:
+                    text.append(paragraph.text)
+            return "\n".join(text)
+        except Exception as e:
+            logger.error(f"Error extracting text from DOCX: {str(e)}")
+            raise HTTPException(
+                status_code=422,
+                detail=f"Error extracting text from DOCX: {str(e)}"
+            )
+
+    def _extract_text_from_binary(self, content: bytes, filename: str) -> str:
+        """Extract text from binary file formats."""
+        ext = filename.lower().split('.')[-1]
+        if ext == 'pdf':
+            return self._extract_text_from_pdf(content)
+        elif ext in ['docx', 'doc']:
+            return self._extract_text_from_docx(content)
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unsupported binary file format: .{ext}"
+            )
 
     def _sanitize_filename(self, filename: str) -> str:
         """Sanitize the filename to be safe for storage."""
@@ -221,7 +270,20 @@ class UploadService:
             if content_size > 0:
                 logger.info("Starting embedding generation")
                 try:
-                    text_content = content.decode('utf-8')
+                    # Handle binary files (PDF, DOCX)
+                    ext = file.filename.lower().split('.')[-1]
+                    if ext in ['pdf', 'docx', 'doc']:
+                        text_content = self._extract_text_from_binary(content, file.filename)
+                    else:
+                        try:
+                            text_content = content.decode('utf-8')
+                        except UnicodeDecodeError:
+                            logger.error("Failed to decode file content as UTF-8")
+                            raise HTTPException(
+                                status_code=422,
+                                detail="File content must be valid UTF-8 text"
+                            )
+
                     try:
                         await self.embedding_service.generate_and_save_embedding(
                             text_content,
@@ -258,9 +320,9 @@ class UploadService:
                         self.supabase.table('files').update({
                             'status': 'error'
                         }).eq('id', file_record.id).execute()
-                except UnicodeDecodeError as e:
-                    embedding_status = "error_decode"
-                    logger.error(f"Failed to decode file content: {str(e)}")
+                except Exception as e:
+                    embedding_status = "error"
+                    logger.error(f"Failed to process file content: {str(e)}")
                     self.supabase.table('files').update({
                         'status': 'error'
                     }).eq('id', file_record.id).execute()

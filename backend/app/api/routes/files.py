@@ -74,22 +74,25 @@ async def upload_file(
             # Check if file is empty
             if file_size == 0:
                 logger.info("Empty file received, will process with empty content flag")
-                
-            # Basic content validation
-            try:
-                # Only try to decode content if file is not empty
-                if file_size > 0:
-                    # Try to decode a small sample to check if it's text
-                    sample = content[:1024].decode('utf-8')
-                    logger.debug("File content sample validation successful")
-                else:
-                    logger.debug("Skipping content validation for empty file")
-            except UnicodeDecodeError:
-                logger.error("File content is not valid UTF-8 text")
-                raise HTTPException(
-                    status_code=422,
-                    detail="File content must be valid UTF-8 text"
-                )
+            
+            # Skip UTF-8 validation for binary files (PDF, DOCX)
+            ext = file.filename.lower().split('.')[-1]
+            if ext not in ['pdf', 'docx', 'doc']:
+                # Basic content validation for non-binary files
+                try:
+                    # Only try to decode content if file is not empty
+                    if file_size > 0:
+                        # Try to decode a small sample to check if it's text
+                        sample = content[:1024].decode('utf-8')
+                        logger.debug("File content sample validation successful")
+                    else:
+                        logger.debug("Skipping content validation for empty file")
+                except UnicodeDecodeError:
+                    logger.error("File content is not valid UTF-8 text")
+                    raise HTTPException(
+                        status_code=422,
+                        detail="File content must be valid UTF-8 text"
+                    )
                 
         except Exception as e:
             logger.error(f"Error reading file content: {str(e)}")
