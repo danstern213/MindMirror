@@ -92,6 +92,26 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Promo GIF Section */}
+      <section className="py-16 relative bg-[var(--paper-texture)]">
+        <div className="container mx-auto px-6">
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.2 }}
+            className="max-w-4xl mx-auto"
+          >
+            <div className="rounded-lg overflow-hidden shadow-[8px_8px_0px_0px_rgba(0,66,37,0.3)] border-2 border-[var(--primary-dark)]">
+              <img 
+                src="/images/promo.gif" 
+                alt="AI Note Copilot Demo" 
+                className="w-full h-auto"
+              />
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
       {/* Features Section */}
       <section className="py-24 relative">
         <div className="absolute inset-0 bg-[var(--primary-dark)]" />
