@@ -2,6 +2,7 @@ import { useRef, useState, useEffect } from 'react';
 import { useFileStore } from '@/stores/fileStore';
 import { DocumentPlusIcon } from '@heroicons/react/24/outline';
 import { XCircleIcon } from '@heroicons/react/20/solid';
+import { InformationCircleIcon } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import { UploadProgress } from './UploadProgress';
 
@@ -13,6 +14,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 export function FileUpload() {
   const { totalFiles, uploadFile, uploading, error, fetchTotalFiles, clearError, setUploadProgress } = useFileStore();
   const [dragActive, setDragActive] = useState(false);
+  const [showNotesInfo, setShowNotesInfo] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -275,6 +277,33 @@ export function FileUpload() {
         </div>
 
         {uploading && <UploadProgress />}
+
+        <div className="mt-6 rounded-sm border border-[var(--primary-dark)] bg-[var(--paper-texture)] p-4">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <InformationCircleIcon className="h-5 w-5 text-[var(--primary-green)]" aria-hidden="true" />
+            </div>
+            <div className="ml-3 flex-grow">
+              <div className="flex justify-between items-center">
+                <h2 className="text-base font-serif font-bold text-[var(--primary-green)]">Adding Your Notes</h2>
+                <button
+                  onClick={() => setShowNotesInfo(!showNotesInfo)}
+                  className="text-xs academia-text text-[var(--primary-dark)] hover:text-[var(--primary-green)] transition-colors"
+                >
+                  {showNotesInfo ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              {showNotesInfo && (
+                <div className="mt-2 text-sm academia-text space-y-1">
+                  <p>• It takes about 2-4 seconds to process each file.  Add as many as you want!</p>
+                  <p>• Each file is automatically indexed and saved for searching</p>
+                  <p>• You'll see success messages for each file as it's processed</p>
+                  <p>• In case of an error, we'll tell you so you can try again</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
