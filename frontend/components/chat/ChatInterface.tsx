@@ -26,6 +26,7 @@ export function ChatInterface() {
     loading,
     error,
     processingStatus,
+    searchProgress,
     isStreaming,
     fetchThreads,
     createThread,
@@ -143,11 +144,24 @@ export function ChatInterface() {
                         isStreaming={index === currentThread.messages.length - 1 && isStreaming}
                       />
                     ))}
-                    {processingStatus && (
+                    {processingStatus && processingStatus !== 'Generating response...' && (
                       <div className="p-4 flex items-center justify-center">
-                        <div className="flex items-center space-x-2">
-                          <div className="animate-pulse h-2 w-2 rounded-full bg-[var(--primary-accent)]"></div>
-                          <div className="text-sm text-[var(--primary-dark)] font-serif">{processingStatus}</div>
+                        <div className="flex flex-col items-center space-y-2 w-full max-w-xs">
+                          <div className="w-full bg-gray-200 rounded-full h-1.5">
+                            <div 
+                              className="bg-[var(--primary-accent)] h-1.5 rounded-full transition-all duration-300 ease-in-out" 
+                              style={{ 
+                                width: processingStatus === 'Searching documents...' ? `${Math.max(10, searchProgress)}%` : 
+                                      processingStatus === 'Analyzing context...' ? '80%' : '0%' 
+                              }}
+                            ></div>
+                          </div>
+                          <div className="text-sm text-[var(--primary-dark)] font-serif">
+                            {processingStatus}
+                            {processingStatus === 'Searching documents...' && searchProgress > 0 && (
+                              <span className="text-xs ml-1">({searchProgress}%)</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     )}

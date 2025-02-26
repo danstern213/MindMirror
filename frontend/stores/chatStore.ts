@@ -8,6 +8,7 @@ interface ChatState {
   loading: boolean;
   error: string | null;
   processingStatus: string;
+  searchProgress: number;
   currentStreamingContent: string;
   isStreaming: boolean;
   fetchThreads: () => Promise<void>;
@@ -18,6 +19,7 @@ interface ChatState {
   appendMessage: (message: Message) => void;
   appendStreamToken: (content: string) => void;
   setProcessingStatus: (status: string) => void;
+  setSearchProgress: (progress: number) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -26,11 +28,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
   loading: false,
   error: null,
   processingStatus: '',
+  searchProgress: 0,
   currentStreamingContent: '',
   isStreaming: false,
 
   setProcessingStatus: (status: string) => {
     set({ processingStatus: status });
+  },
+
+  setSearchProgress: (progress: number) => {
+    set({ searchProgress: progress });
   },
 
   fetchThreads: async () => {
@@ -80,7 +87,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   sendMessage: async (content: string) => {
-    const { currentThread, setProcessingStatus } = get();
+    const { currentThread, setProcessingStatus, setSearchProgress } = get();
 
     try {
       // Add user message immediately
@@ -99,21 +106,56 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
       get().appendMessage(assistantMessage);
 
-      set({ isStreaming: true });
+      set({ isStreaming: true, searchProgress: 0 });
 
       try {
         setProcessingStatus('Searching documents...');
-        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Flag to control the progress simulation
+        let isSearching = true;
+        
+        // Simulate incremental search progress that continues until we get a response
+        const simulateSearchProgress = async () => {
+          let progress = 0;
+          
+          // Initial fast progress up to 30%
+          while (progress < 30 && isSearching) {
+            await new Promise(resolve => setTimeout(resolve, 200));
+            progress += 5;
+            setSearchProgress(progress);
+          }
+          
+          // Slower progress from 30% to 50%
+          while (progress < 50 && isSearching) {
+            await new Promise(resolve => setTimeout(resolve, 300));
+            progress += 3;
+            setSearchProgress(progress);
+          }
+          
+          // Very slow progress from 50% to 90%, ensuring we don't reach 100% before getting a response
+          while (isSearching) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            // Gradually slow down the progress increments as we get higher
+            const increment = Math.max(1, Math.floor(10 / (progress / 10)));
+            progress = Math.min(90, progress + increment);
+            setSearchProgress(progress);
+          }
+        };
+        
+        // Start the progress simulation
+        simulateSearchProgress();
 
         for await (const chunk of api.streamMessage(content, currentThread?.id)) {
           if (chunk.content) {
+            // Stop the search progress simulation when we get the first content chunk
+            isSearching = false;
+            
             if (get().processingStatus === 'Searching documents...') {
               setProcessingStatus('Analyzing context...');
-              await new Promise(resolve => setTimeout(resolve, 500));
+              setSearchProgress(0); // Reset for next phase
             }
             if (get().processingStatus === 'Analyzing context...') {
               setProcessingStatus('Generating response...');
-              await new Promise(resolve => setTimeout(resolve, 500));
             }
 
             // Update immediately without accumulating
@@ -165,7 +207,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         };
       });
     } finally {
-      set({ isStreaming: false });
+      set({ isStreaming: false, searchProgress: 0 });
       setProcessingStatus('');
     }
   },
