@@ -57,12 +57,25 @@ class ApiClient {
             errorData
           });
           
+          // Check for token limit errors
+          if (endpoint === '/chat/message' && 
+              (errorMessage.includes('Token limit exceeded') || 
+               errorMessage.includes('rate limit') || 
+               errorMessage.includes('maximum context length'))) {
+            errorMessage = "Looks like we hit our token limit. Since we're free for now, we need to top up our credits with OpenAI. We're on it! Refresh the page and try again in a bit.";
+          }
+          
           // For file upload errors, add more context
           if (endpoint === '/files/upload') {
             errorMessage = `File upload failed: ${errorMessage}`;
           }
         } catch {
           errorMessage = `Request failed with status: ${response.status} ${response.statusText}`;
+          
+          // If this is a "Failed to fetch" error for chat messages, it might be a token limit issue
+          if (endpoint === '/chat/message') {
+            errorMessage = "Looks like we hit our token limit. Since we're free for now, we need to top up our credits with OpenAI. We're on it! Refresh the page and try again in a bit.";
+          }
         }
 
         // If unauthorized, try to refresh the session
@@ -111,6 +124,13 @@ class ApiClient {
         error: error instanceof Error ? error.message : 'Unknown error',
         fullError: error
       });
+      
+      // Check for "Failed to fetch" errors which might be token limit issues
+      if (error instanceof Error && 
+          endpoint === '/chat/message' && 
+          error.message.includes('Failed to fetch')) {
+        throw new Error("Looks like we hit our token limit. Since we're free for now, we need to top up our credits with OpenAI. We're on it! Refresh the page and try again in a bit.");
+      }
       
       // Ensure we always throw an Error object with a string message
       if (error instanceof Error) {

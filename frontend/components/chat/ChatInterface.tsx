@@ -80,9 +80,24 @@ export function ChatInterface() {
   }
 
   if (error) {
+    const isTokenLimitError = error.includes("token limit");
+    
     return (
       <div className="flex h-screen items-center justify-center">
-        <div className="text-red-500">{error}</div>
+        <div className={`max-w-md p-6 rounded-md border ${isTokenLimitError ? 'border-amber-300 bg-amber-50' : 'border-red-300 bg-red-50'}`}>
+          <h3 className={`text-lg font-serif mb-2 ${isTokenLimitError ? 'text-amber-800' : 'text-red-800'}`}>
+            {isTokenLimitError ? 'Token Limit Reached' : 'Error'}
+          </h3>
+          <p className={`${isTokenLimitError ? 'text-amber-700' : 'text-red-700'} font-serif`}>
+            {error}
+          </p>
+          <button 
+            onClick={() => window.location.reload()} 
+            className="mt-4 px-4 py-2 bg-[var(--primary-accent)] text-[var(--paper-texture)] rounded-sm font-serif hover:bg-opacity-90"
+          >
+            Refresh Page
+          </button>
+        </div>
       </div>
     );
   }

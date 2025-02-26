@@ -295,7 +295,7 @@ export function FileUpload() {
               </div>
               {showNotesInfo && (
                 <div className="mt-2 text-sm academia-text space-y-1">
-                  <p>• It takes about 2-4 seconds to process each file.  Add as many as you want!</p>
+                  <p>• It takes about 2-4 seconds to process each file.  Bulk add as many as you want at once!</p>
                   <p>• Each file is automatically indexed and saved for searching</p>
                   <p>• You'll see success messages for each file as it's processed</p>
                   <p>• In case of an error, we'll tell you so you can try again</p>

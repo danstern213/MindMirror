@@ -51,12 +51,12 @@ export function SettingsPanel() {
         <h3 className="text-lg font-medium text-gray-900">OpenAI API Key</h3>
         <div className="mt-2">
           <input
-            type="password"
-            value={settings.openai_api_key || ''}
-            onChange={(e) => updateSettings({ openai_api_key: e.target.value })}
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-            placeholder="Enter your OpenAI API key..."
+            type="text"
+            disabled
+            className="block w-full rounded-md border-gray-300 shadow-sm bg-gray-100 text-gray-500 sm:text-sm cursor-not-allowed"
+            placeholder="Coming Soon!"
           />
+          <p className="mt-1 text-xs text-gray-500">This feature is coming soon!</p>
         </div>
       </div>
 
@@ -64,14 +64,13 @@ export function SettingsPanel() {
         <h3 className="text-lg font-medium text-gray-900">Model</h3>
         <div className="mt-2">
           <select
-            value={settings.model}
-            onChange={(e) => updateSettings({ model: e.target.value })}
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+            disabled
+            className="block w-full rounded-md border-gray-300 shadow-sm bg-gray-100 text-gray-500 sm:text-sm cursor-not-allowed"
+            defaultValue=""
           >
-            <option value="gpt-4-0125-preview">GPT-4 Turbo</option>
-            <option value="gpt-4">GPT-4</option>
-            <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+            <option value="" disabled>Coming Soon!</option>
           </select>
+          <p className="mt-1 text-xs text-gray-500">This feature is coming soon!</p>
         </div>
       </div>
     </div>
