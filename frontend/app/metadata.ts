@@ -9,11 +9,13 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'AI Note Copilot',
     description: 'Talk to your notes, creating new connections with AI. It\'s like having your personal sanctuary of knowledge.',
-    images: [{ url: '/favicon.svg', width: 32, height: 32 }],
+    type: 'website',
+    images: [{ url: '/images/vintage-study.jpg', width: 1792, height: 1024, alt: 'AI Note Copilot' }],
   },
   twitter: {
+    card: 'summary_large_image',
     title: 'AI Note Copilot',
     description: 'Talk to your notes, creating new connections with AI. It\'s like having your personal sanctuary of knowledge.',
-    images: [{ url: '/favicon.svg', width: 32, height: 32 }],
+    images: [{ url: '/images/vintage-study.jpg', width: 1792, height: 1024, alt: 'AI Note Copilot' }],
   }
 } 

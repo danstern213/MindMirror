@@ -28,41 +28,36 @@ export default function ClientLayout({
   const isAuthPage = pathname === '/auth';
 
   return (
-    <html lang="en" className={`${inter.variable} ${playfair.variable} ${!isLandingPage ? 'h-full' : ''} antialiased`}>
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      </head>
-      <body className={`academia-container ${!isLandingPage && !isAuthPage ? 'h-screen overflow-hidden' : ''}`}>
-        <AuthProvider>
-          <div className={`${!isLandingPage && !isAuthPage ? 'h-full' : ''}`}>
-            <main className={`relative ${!isLandingPage && !isAuthPage ? 'h-full' : ''}`}>
-              {children}
-            </main>
-            <Toaster 
-              position="bottom-right" 
-              toastOptions={{
-                duration: 3000,
-                style: {
-                  background: 'var(--paper-texture)',
-                  color: 'var(--primary-dark)',
-                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -1px rgba(0, 0, 0, 0.1)',
-                  border: '1px solid var(--primary-dark)',
-                  fontFamily: 'var(--font-playfair), serif',
-                },
-              }}
-              containerStyle={{
-                bottom: 40,
-                right: 40,
-                maxHeight: '200px',
-                position: 'fixed',
-                zIndex: 9999,
-              }}
-              gutter={8}
-              containerClassName="overflow-hidden"
-            />
-          </div>
-        </AuthProvider>
-      </body>
-    </html>
+    <div className={`${inter.variable} ${playfair.variable} ${!isLandingPage ? 'h-full' : ''} antialiased academia-container ${!isLandingPage && !isAuthPage ? 'h-screen overflow-hidden' : ''}`}>
+      <AuthProvider>
+        <div className={`${!isLandingPage && !isAuthPage ? 'h-full' : ''}`}>
+          <main className={`relative ${!isLandingPage && !isAuthPage ? 'h-full' : ''}`}>
+            {children}
+          </main>
+          <Toaster 
+            position="bottom-right" 
+            toastOptions={{
+              duration: 3000,
+              style: {
+                background: 'var(--paper-texture)',
+                color: 'var(--primary-dark)',
+                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -1px rgba(0, 0, 0, 0.1)',
+                border: '1px solid var(--primary-dark)',
+                fontFamily: 'var(--font-playfair), serif',
+              },
+            }}
+            containerStyle={{
+              bottom: 40,
+              right: 40,
+              maxHeight: '200px',
+              position: 'fixed',
+              zIndex: 9999,
+            }}
+            gutter={8}
+            containerClassName="overflow-hidden"
+          />
+        </div>
+      </AuthProvider>
+    </div>
   );
 } 
