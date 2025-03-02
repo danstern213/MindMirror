@@ -2,7 +2,10 @@ import { Message } from '@/types';
 import ReactMarkdown from 'react-markdown';
 import { Disclosure } from '@headlessui/react';
 import { ChevronUpIcon } from '@heroicons/react/24/outline';
-import React, { ReactNode } from 'react';
+import { DocumentArrowDownIcon } from '@heroicons/react/24/outline';
+import React, { ReactNode, useState } from 'react';
+import { useFileStore } from '@/stores/fileStore';
+import toast from 'react-hot-toast';
 
 interface ChatMessageProps {
   message: Message;
@@ -59,6 +62,71 @@ const MarkdownElement = ({ tag: Tag, className, children }: { tag: any, classNam
 export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) {
   const isAssistant = message.role === 'assistant';
   const hasSources = !isStreaming && message.sources && message.sources.length > 0;
+  const [isSaving, setIsSaving] = useState(false);
+  const { uploadFile, fetchTotalFiles } = useFileStore();
+
+  // Function to save the message as a document
+  const saveAsDocument = async () => {
+    if (!message.content || isStreaming) return;
+    
+    setIsSaving(true);
+    // Show loading toast
+    const loadingToast = toast.loading('Saving response to your documents...');
+    
+    try {
+      // Create a title from the first few words of the response
+      const titleText = message.content
+        .split(/\s+/)
+        .slice(0, 5)
+        .join(' ')
+        .replace(/[^\w\s]/g, '')
+        .trim();
+      
+      // Create a date string for the filename (YYYY-MM-DD format)
+      const today = new Date();
+      const dateString = today.toISOString().split('T')[0]; // Gets YYYY-MM-DD
+      
+      // Sanitize the filename to ensure it's valid
+      const sanitizedTitle = titleText.length > 0 
+        ? titleText.replace(/[^a-zA-Z0-9_\-\s]/g, '').replace(/\s+/g, '_')
+        : 'AI_Response';
+      
+      const filename = `${sanitizedTitle}_${dateString}.md`;
+      
+      // Create the markdown content with a title
+      let markdownContent = `# ${titleText.length > 0 ? titleText : 'AI Response'}\n\n${message.content}`;
+      
+      // Add sources if available
+      if (message.sources && message.sources.length > 0) {
+        markdownContent += '\n\n## Sources\n\n';
+        message.sources.forEach((source, index) => {
+          markdownContent += `${index + 1}. **${source.title}** (Relevance: ${(source.score * 100).toFixed(1)}%)\n`;
+          if (source.matched_keywords && source.matched_keywords.length > 0) {
+            markdownContent += `   - Matched terms: ${source.matched_keywords.join(', ')}\n`;
+          }
+          markdownContent += '\n';
+        });
+      }
+      
+      // Create a file object
+      const file = new File([markdownContent], filename, { type: 'text/markdown' });
+      
+      // Upload the file
+      await uploadFile(file);
+      
+      // Refresh the file count
+      await fetchTotalFiles();
+      
+      // Update the loading toast to success
+      toast.success('Response saved to your documents', { id: loadingToast });
+    } catch (error) {
+      console.error('Error saving response:', error);
+      // Update the loading toast to error
+      toast.error('Failed to save response', { id: loadingToast });
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <div className={`py-4 ${isAssistant ? 'bg-[var(--paper-texture)] border-y border-[var(--primary-dark)]' : ''}`}>
@@ -147,41 +215,69 @@ export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) 
                 {message.content}
               </ReactMarkdown>
             </div>
-            {hasSources && (
-              <Disclosure as="div" className="mt-4">
-                {({ open }) => (
-                  <>
-                    <Disclosure.Button className="flex items-center text-sm academia-text hover:text-[var(--primary-accent)]">
-                      <ChevronUpIcon
-                        className={`${open ? 'transform rotate-180' : ''} w-4 h-4 mr-1`}
-                      />
-                      View Sources ({message.sources!.length})
-                    </Disclosure.Button>
-                    <Disclosure.Panel className="mt-2">
-                      <div className="space-y-2">
-                        {message.sources!.map((source, index) => (
-                          <div
-                            key={index}
-                            className="text-sm academia-card"
+            {isAssistant && !isStreaming && (
+              <div className="mt-4 flex items-center justify-between">
+                {hasSources ? (
+                  <Disclosure as="div" className="flex-1">
+                    {({ open }) => (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <Disclosure.Button className="flex items-center text-sm academia-text hover:text-[var(--primary-accent)]">
+                            <ChevronUpIcon
+                              className={`${open ? 'transform rotate-180' : ''} w-4 h-4 mr-1`}
+                            />
+                            View Sources ({message.sources!.length})
+                          </Disclosure.Button>
+                          <button
+                            onClick={saveAsDocument}
+                            disabled={isSaving}
+                            className="inline-flex items-center px-4 py-2 border border-[var(--primary-green)] rounded-sm shadow-sm text-sm font-serif text-[var(--paper-texture)] bg-[var(--primary-green)] hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--primary-green)]"
+                            title="Save this response to your document repository"
                           >
-                            <div className="font-serif font-medium text-[var(--primary-dark)]">
-                              {source.title}
-                            </div>
-                            <div className="mt-1 academia-text">
-                              Relevance: {(source.score * 100).toFixed(1)}%
-                            </div>
-                            {source.matched_keywords && source.matched_keywords.length > 0 && (
-                              <div className="mt-1 academia-text">
-                                Matched terms: {source.matched_keywords.join(', ')}
+                            <DocumentArrowDownIcon className="h-4 w-4 mr-1.5" />
+                            {isSaving ? 'Saving...' : 'Save to my Notes'}
+                          </button>
+                        </div>
+                        <Disclosure.Panel className="mt-2">
+                          <div className="space-y-2">
+                            {message.sources!.map((source, index) => (
+                              <div
+                                key={index}
+                                className="text-sm academia-card"
+                              >
+                                <div className="font-serif font-medium text-[var(--primary-dark)]">
+                                  {source.title}
+                                </div>
+                                <div className="mt-1 academia-text">
+                                  Relevance: {(source.score * 100).toFixed(1)}%
+                                </div>
+                                {source.matched_keywords && source.matched_keywords.length > 0 && (
+                                  <div className="mt-1 academia-text">
+                                    Matched terms: {source.matched_keywords.join(', ')}
+                                  </div>
+                                )}
                               </div>
-                            )}
+                            ))}
                           </div>
-                        ))}
-                      </div>
-                    </Disclosure.Panel>
-                  </>
+                        </Disclosure.Panel>
+                      </>
+                    )}
+                  </Disclosure>
+                ) : (
+                  <div className="flex-1"></div> 
                 )}
-              </Disclosure>
+                {!hasSources && (
+                  <button
+                    onClick={saveAsDocument}
+                    disabled={isSaving}
+                    className="inline-flex items-center px-4 py-2 border border-[var(--primary-green)] rounded-sm shadow-sm text-sm font-serif text-[var(--paper-texture)] bg-[var(--primary-green)] hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--primary-green)]"
+                    title="Save this response to your document repository"
+                  >
+                    <DocumentArrowDownIcon className="h-4 w-4 mr-1.5" />
+                    {isSaving ? 'Saving...' : 'Save to my Notes'}
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>
