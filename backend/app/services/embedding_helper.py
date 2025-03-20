@@ -92,11 +92,38 @@ def generate_embedding(text: str, api_key: Optional[str] = None) -> List[float]:
         # Further sanitize and truncate text
         # Replace problematic characters and normalize whitespace
         sanitized_text = ' '.join(sanitized_text.replace('\x00', ' ').split())
-        truncated_text = sanitized_text[:8000]  # OpenAI has a token limit
         
-        if len(text) > 8000:
-            logger.warning(f"Text truncated from {len(text)} to 8000 characters")
+        # Use tiktoken to count tokens and ensure we're under the limit
+        # Import here to avoid circular imports
+        try:
+            import tiktoken
+            # Map model names consistently
+            model_name = settings.EMBEDDING_MODEL.lower()
+            encoding_model = "cl100k_base"  # Default for embedding models
             
+            # Specific model mappings if needed
+            if "text-embedding-ada" in model_name:
+                encoding_model = "cl100k_base"
+            
+            encoding = tiktoken.get_encoding(encoding_model)
+            tokens = encoding.encode(sanitized_text)
+            
+            # Ada embedding model has an 8191 token limit
+            if len(tokens) > 8191:
+                logger.warning(f"Text has {len(tokens)} tokens, exceeding the limit. Truncating.")
+                truncated_tokens = tokens[:8191]
+                truncated_text = encoding.decode(truncated_tokens)
+                logger.info(f"Truncated from {len(tokens)} to {len(truncated_tokens)} tokens")
+            else:
+                truncated_text = sanitized_text
+                logger.info(f"Text has {len(tokens)} tokens, under the 8191 limit.")
+        except ImportError:
+            # Fallback to character-based truncation if tiktoken is not available
+            logger.warning("tiktoken not available, using character-based truncation")
+            truncated_text = sanitized_text[:8000]  # Conservative character limit
+            if len(sanitized_text) > 8000:
+                logger.warning(f"Text truncated from {len(sanitized_text)} to 8000 characters")
+        
         if not truncated_text.strip():
             logger.error("Text became empty after sanitization")
             raise ValueError("Text became empty after sanitization")

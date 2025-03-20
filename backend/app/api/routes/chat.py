@@ -131,7 +131,24 @@ async def send_message(
     except HTTPException:
         raise
     except Exception as e:
+        error_message = str(e)
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        
+        # Check for token limit errors
+        if 'rate_limit_exceeded' in error_message.lower() or 'token' in error_message.lower() and 'limit' in error_message.lower():
+            status_code = status.HTTP_429_TOO_MANY_REQUESTS
+            error_message = "Token limit exceeded. The system is managing your request to fit within available token limits. Please try breaking your query into smaller parts or wait a moment before trying again."
+        
+        # Check for other OpenAI API errors
+        elif 'openai' in error_message.lower():
+            if '401' in error_message or 'unauthorized' in error_message.lower():
+                status_code = status.HTTP_401_UNAUTHORIZED
+                error_message = "OpenAI API authentication failed. Please check your API key."
+            elif '429' in error_message:
+                status_code = status.HTTP_429_TOO_MANY_REQUESTS
+                error_message = "OpenAI rate limit exceeded. Please try again later."
+        
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to process message: {str(e)}"
+            status_code=status_code,
+            detail=f"Failed to process message: {error_message}"
         ) 
