@@ -47,6 +47,17 @@ async def log_requests(request: Request, call_next):
             content={"detail": str(e), "traceback": traceback.format_exc()}
         )
 
+@app.middleware("http")
+async def add_keep_alive_header(request: Request, call_next):
+    """Add keep-alive headers to improve streaming performance"""
+    response = await call_next(request)
+    response.headers.update({
+        "Connection": "keep-alive",
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no"
+    })
+    return response
+
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
