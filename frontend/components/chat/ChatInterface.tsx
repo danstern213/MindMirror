@@ -8,7 +8,7 @@ import { FileUpload } from '../files/FileUpload';
 import { SettingsPanel } from '../settings/SettingsPanel';
 import { Dialog, Transition } from '@headlessui/react';
 import { Fragment } from 'react';
-import { Cog6ToothIcon } from '@heroicons/react/24/outline';
+import { Cog6ToothIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import { Logo } from '../common/Logo';
 
 // Processing status messages
@@ -37,6 +37,7 @@ export function ChatInterface() {
 
   const { user, logout } = useAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // Auto-create thread when no threads exist
   useEffect(() => {
@@ -230,13 +231,25 @@ export function ChatInterface() {
       </div>
 
       {/* File upload sidebar */}
-      <div className="w-80 border-l border-[var(--primary-dark)] bg-[var(--paper-texture)]">
-        <div className="p-4 border-b border-[var(--primary-dark)]">
-          <h2 className="academia-heading">Documents</h2>
+      <div className={`${isSidebarCollapsed ? 'w-12' : 'w-80'} border-l border-[var(--primary-dark)] bg-[var(--paper-texture)] transition-all duration-300`}>
+        <div className="p-4 border-b border-[var(--primary-dark)] flex items-center justify-between">
+          {!isSidebarCollapsed && <h2 className="academia-heading">Documents</h2>}
+          <button
+            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            className="p-2 text-[var(--paper-texture)] bg-[var(--primary-green)] rounded-sm hover:opacity-90"
+          >
+            {isSidebarCollapsed ? (
+              <ChevronLeftIcon className="h-5 w-5" />
+            ) : (
+              <ChevronRightIcon className="h-5 w-5" />
+            )}
+          </button>
         </div>
-        <div className="flex-1 overflow-y-auto">
-          <FileUpload />
-        </div>
+        {!isSidebarCollapsed && (
+          <div className="flex-1 overflow-y-auto">
+            <FileUpload />
+          </div>
+        )}
       </div>
 
       {/* Settings modal */}
