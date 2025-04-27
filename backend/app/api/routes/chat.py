@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from typing import List, AsyncGenerator
 from uuid import UUID
+import gzip
+import json
 
 from ...models.chat import ChatThread, ChatRequest, ChatResponse, StreamingChatResponse
 from ...services.chat_service import ChatService
@@ -120,12 +122,19 @@ async def send_message(
                 thread_id=request.thread_id,
                 user_id=current_user_id
             ):
-                yield f"data: {chunk.model_dump_json()}\n\n"
-            yield "data: [DONE]\n\n"
+                # Keep SSE format intact
+                chunk_data = f"data: {chunk.model_dump_json()}\n\n"
+                yield chunk_data
+            # Send final [DONE] message
+            done_data = "data: [DONE]\n\n"
+            yield done_data
         
         return StreamingResponse(
             stream_response(),
-            media_type="text/event-stream"
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache"
+            }
         )
         
     except HTTPException:

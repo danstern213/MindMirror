@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 import uvicorn
 import logging
 import traceback
@@ -27,6 +28,9 @@ app = FastAPI(
     openapi_url="/api/v1/openapi.json",
     redoc_url="/api/v1/redoc"
 )
+
+# Add GZip compression middleware
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
