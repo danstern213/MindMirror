@@ -187,6 +187,16 @@ class ApiClient {
     return response.json();
   }
 
+  async getThreadMessages(threadId: string): Promise<any[]> {
+    try {
+      const response = await this.fetch(`/chat/threads/${threadId}/messages`);
+      return response.json();
+    } catch (error: any) {
+      console.error('Failed to fetch thread messages:', error);
+      throw new Error('Failed to load chat messages. Please refresh the page and try again.');
+    }
+  }
+
   async deleteThread(threadId: string): Promise<void> {
     await this.fetch(`/chat/threads/${threadId}`, {
       method: 'DELETE',

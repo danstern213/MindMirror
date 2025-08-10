@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any, AsyncGenerator
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 import logging
 import json
@@ -18,8 +18,33 @@ from ..core.utils import count_tokens, truncate_messages_to_fit_limit
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
+def _format_datetime_for_db(dt: datetime) -> str:
+    """Convert datetime to consistent format for database storage."""
+    return dt.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+
+def _parse_datetime_from_db(dt_str: str) -> datetime:
+    """Parse datetime from database with fallback handling."""
+    try:
+        # Try direct parsing first
+        return datetime.fromisoformat(dt_str)
+    except ValueError:
+        try:
+            # Handle Z suffix format
+            if dt_str.endswith('Z'):
+                dt_str = dt_str[:-1] + '+00:00'
+            return datetime.fromisoformat(dt_str)
+        except ValueError:
+            # Last resort: strip timezone and parse as UTC
+            if '+' in dt_str:
+                dt_str_clean = dt_str.split('+')[0]
+            elif '-' in dt_str and dt_str.count('-') > 2:  # More than date separators
+                dt_str_clean = dt_str.split('-', 3)[0] + '-' + dt_str.split('-', 3)[1] + '-' + dt_str.split('-', 3)[2]
+            else:
+                dt_str_clean = dt_str
+            return datetime.strptime(dt_str_clean, '%Y-%m-%dT%H:%M:%S.%f')
+
 class ChatService:
-    """Service for managing chat functionality."""
+    """Service for managing chat functionality with database persistence."""
     
     def __init__(
         self,
@@ -31,8 +56,6 @@ class ChatService:
         self.search_service = search_service
         self.storage_service = storage_service
         self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        # In-memory storage for threads
-        self.threads: Dict[UUID, ChatThread] = {}
         # User-specific settings
         self.user_settings: Dict[UUID, Dict[str, str]] = {}
     
@@ -65,45 +88,156 @@ class ChatService:
         return results
 
     async def create_thread(self, user_id: UUID, title: str = "New Chat") -> ChatThread:
-        """Create a new chat thread."""
-        thread_id = uuid4()
-        thread = ChatThread(
-            id=thread_id,
-            title=title,
-            messages=[],
-            user_id=user_id,
-            created=datetime.utcnow(),
-            last_updated=datetime.utcnow()
-        )
-        self.threads[thread_id] = thread
-        logger.info(f"Created new thread {thread_id} for user {user_id}")
-        return thread
+        """Create a new chat thread in the database."""
+        try:
+            thread_id = uuid4()
+            
+            # Insert the thread into the database
+            response = self.supabase.table('chat_threads').insert({
+                'id': str(thread_id),
+                'title': title,
+                'user_id': str(user_id),
+                'created': _format_datetime_for_db(datetime.now(timezone.utc)),
+                'last_updated': _format_datetime_for_db(datetime.now(timezone.utc))
+            }).execute()
+            
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"Database error creating thread: {response.error}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to create chat thread in database"
+                )
+            
+            if not response.data:
+                raise HTTPException(
+                    status_code=500,
+                    detail="No data returned when creating thread"
+                )
+            
+            # Create the thread object from the database response
+            thread_data = response.data[0]
+            thread = ChatThread(
+                id=thread_id,
+                title=thread_data['title'],
+                messages=[],  # Start with empty messages (lazy loading)
+                user_id=user_id,
+                created=_parse_datetime_from_db(thread_data['created']),
+                last_updated=_parse_datetime_from_db(thread_data['last_updated'])
+            )
+            
+            logger.info(f"Created new thread {thread_id} for user {user_id}")
+            return thread
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error creating thread: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create thread: {str(e)}"
+            )
 
     async def get_thread(self, thread_id: UUID, user_id: UUID) -> Optional[ChatThread]:
-        """Get a chat thread by ID."""
-        thread = self.threads.get(thread_id)
-        if not thread:
-            logger.error(f"Thread {thread_id} not found")
+        """Get a chat thread by ID from the database."""
+        try:
+            # Get thread metadata
+            thread_response = self.supabase.table('chat_threads')\
+                .select('*')\
+                .eq('id', str(thread_id))\
+                .eq('user_id', str(user_id))\
+                .single()\
+                .execute()
+            
+            if hasattr(thread_response, 'error') and thread_response.error:
+                logger.error(f"Database error fetching thread: {thread_response.error}")
+                return None
+            
+            if not thread_response.data:
+                logger.error(f"Thread {thread_id} not found for user {user_id}")
+                return None
+            
+            thread_data = thread_response.data
+            
+            # Create thread object (messages will be loaded separately when needed)
+            thread = ChatThread(
+                id=UUID(thread_data['id']),
+                title=thread_data['title'],
+                messages=[],  # Lazy loading - messages loaded separately
+                user_id=UUID(thread_data['user_id']),
+                created=_parse_datetime_from_db(thread_data['created']),
+                last_updated=_parse_datetime_from_db(thread_data['last_updated'])
+            )
+            
+            return thread
+            
+        except Exception as e:
+            logger.error(f"Error fetching thread {thread_id}: {e}")
             return None
-        if thread.user_id != user_id:
-            logger.error(f"Thread {thread_id} belongs to user {thread.user_id}, not {user_id}")
-            return None
-        return thread
 
     async def get_user_threads(self, user_id: UUID) -> List[ChatThread]:
-        """Get all chat threads for a user."""
-        return [
-            thread for thread in self.threads.values()
-            if thread.user_id == user_id
-        ]
+        """Get all chat threads for a user from the database."""
+        try:
+            response = self.supabase.table('chat_threads')\
+                .select('*')\
+                .eq('user_id', str(user_id))\
+                .order('last_updated')\
+                .execute()
+            
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"Database error fetching user threads: {response.error}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to load chat history from database"
+                )
+            
+            threads = []
+            for thread_data in response.data:
+                thread = ChatThread(
+                    id=UUID(thread_data['id']),
+                    title=thread_data['title'],
+                    messages=[],  # Lazy loading - messages loaded separately
+                    user_id=UUID(thread_data['user_id']),
+                    created=_parse_datetime_from_db(thread_data['created']),
+                    last_updated=_parse_datetime_from_db(thread_data['last_updated'])
+                )
+                threads.append(thread)
+            
+            return threads
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error fetching user threads: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to load chat history: {str(e)}"
+            )
     
     async def delete_thread(self, thread_id: UUID, user_id: UUID) -> bool:
-        """Delete a chat thread."""
-        thread = self.threads.get(thread_id)
-        if thread and thread.user_id == user_id:
-            del self.threads[thread_id]
+        """Delete a chat thread from the database."""
+        try:
+            # Verify thread belongs to user first
+            thread = await self.get_thread(thread_id, user_id)
+            if not thread:
+                return False
+            
+            # Delete the thread (CASCADE will handle messages)
+            response = self.supabase.table('chat_threads')\
+                .delete()\
+                .eq('id', str(thread_id))\
+                .eq('user_id', str(user_id))\
+                .execute()
+            
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"Database error deleting thread: {response.error}")
+                return False
+            
+            logger.info(f"Deleted thread {thread_id} for user {user_id}")
             return True
-        return False
+            
+        except Exception as e:
+            logger.error(f"Error deleting thread {thread_id}: {e}")
+            return False
     
     async def add_message(
         self,
@@ -112,22 +246,148 @@ class ChatService:
         content: str,
         sources: Optional[List[Dict[str, Any]]] = None
     ) -> Message:
-        """Add a message to a thread."""
-        message = Message(
-            role=role,
-            content=content,
-            timestamp=datetime.utcnow(),
-            sources=sources
-        )
-        
-        thread = self.threads.get(thread_id)
-        if not thread:
-            raise Exception("Thread not found")
+        """Add a message to a thread in the database."""
+        try:
+            # Create the message object
+            message = Message(
+                role=role,
+                content=content,
+                timestamp=datetime.now(timezone.utc),
+                sources=sources
+            )
             
-        thread.messages.append(message)
-        thread.last_updated = datetime.utcnow()
-        return message
-    
+            # Insert message into database
+            # Convert sources to JSON-serializable format
+            serializable_sources = self._serialize_sources_for_json(sources or [])
+            
+            message_data = {
+                'thread_id': str(thread_id),
+                'role': role,
+                'content': content,
+                'created_at': _format_datetime_for_db(message.timestamp),
+                'sources': serializable_sources
+            }
+            
+            response = self.supabase.table('chat_messages').insert(message_data).execute()
+            
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"Database error adding message: {response.error}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to save message to database"
+                )
+            
+            # Update thread's last_updated timestamp
+            await self._update_thread_timestamp(thread_id)
+            
+            # If this is the first user message, update the thread title
+            if role == 'user':
+                await self._update_thread_title_if_needed(thread_id, content)
+            
+            return message
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error adding message: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to save message: {str(e)}"
+            )
+
+    async def get_thread_messages(self, thread_id: UUID, user_id: UUID) -> List[Message]:
+        """Lazy load messages for a specific thread."""
+        try:
+            # Verify thread belongs to user first
+            thread = await self.get_thread(thread_id, user_id)
+            if not thread:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Chat thread not found or access denied"
+                )
+            
+            # Fetch messages from database
+            response = self.supabase.table('chat_messages')\
+                .select('*')\
+                .eq('thread_id', str(thread_id))\
+                .order('created_at')\
+                .execute()
+            
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"Database error fetching messages: {response.error}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to load chat messages from database"
+                )
+            
+            messages = []
+            for msg_data in response.data:
+                message = Message(
+                    role=msg_data['role'],
+                    content=msg_data['content'],
+                    timestamp=_parse_datetime_from_db(msg_data['created_at']),
+                    sources=msg_data.get('sources', [])
+                )
+                messages.append(message)
+            
+            return messages
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error fetching thread messages: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to load chat messages: {str(e)}"
+            )
+
+    async def _update_thread_timestamp(self, thread_id: UUID) -> None:
+        """Update the last_updated timestamp for a thread."""
+        try:
+            response = self.supabase.table('chat_threads')\
+                .update({'last_updated': _format_datetime_for_db(datetime.now(timezone.utc))})\
+                .eq('id', str(thread_id))\
+                .execute()
+            
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"Database error updating thread timestamp: {response.error}")
+        except Exception as e:
+            logger.error(f"Failed to update thread timestamp: {e}")
+
+    async def _update_thread_title_if_needed(self, thread_id: UUID, first_message: str) -> None:
+        """Update thread title if it's still the default 'New Chat'."""
+        try:
+            # Check if current title is the default
+            thread_response = self.supabase.table('chat_threads')\
+                .select('title')\
+                .eq('id', str(thread_id))\
+                .single()\
+                .execute()
+            
+            if hasattr(thread_response, 'error') or not thread_response.data:
+                return
+            
+            current_title = thread_response.data['title']
+            if current_title == "New Chat":
+                # Generate new title from first message
+                new_title = first_message.strip()
+                if len(new_title) > 50:  # Truncate if too long
+                    new_title = new_title[:47] + "..."
+                
+                # Update the title
+                response = self.supabase.table('chat_threads')\
+                    .update({'title': new_title})\
+                    .eq('id', str(thread_id))\
+                    .execute()
+                
+                if hasattr(response, 'error') and response.error:
+                    logger.error(f"Database error updating thread title: {response.error}")
+                else:
+                    logger.info(f"Updated thread {thread_id} title to: {new_title}")
+                
+        except Exception as e:
+            logger.error(f"Failed to update thread title: {e}")
+
     async def analyze_conversation_continuity(
         self,
         message: str,
@@ -246,6 +506,23 @@ class ChatService:
 
         return context
 
+    def _serialize_sources_for_json(self, sources: List[dict]) -> List[dict]:
+        """Convert sources to JSON-serializable format by converting UUIDs to strings."""
+        if not sources:
+            return []
+        
+        serializable_sources = []
+        for source in sources:
+            serializable_source = {}
+            for key, value in source.items():
+                if isinstance(value, UUID):
+                    serializable_source[key] = str(value)
+                else:
+                    serializable_source[key] = value
+            serializable_sources.append(serializable_source)
+        
+        return serializable_sources
+
     def _prioritize_search_results(self, search_results: List[dict], token_budget: int = 20000) -> List[dict]:
         """
         Prioritize search results to fit within a token budget while maintaining relevant context.
@@ -349,14 +626,28 @@ class ChatService:
             # Generate context using prioritized results
             context = self._generate_context(prioritized_results)
 
-            # If we have a thread, add the message to it
+            # If we have a thread, add the user message to it
             if thread_id:
                 try:
+                    # Verify thread exists and belongs to user
                     thread = await self.get_thread(thread_id, user_id)
-                    if thread:
-                        await self.add_message(thread_id, "user", content)
+                    if not thread:
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Chat thread not found or access denied. Please refresh the page and try again."
+                        )
+                    
+                    # Add user message to database
+                    await self.add_message(thread_id, "user", content)
+                    
+                except HTTPException:
+                    raise
                 except Exception as e:
-                    logger.warning(f"Non-critical error handling thread: {e}")
+                    logger.error(f"Error saving user message to thread: {e}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Failed to save your message. Please try again or refresh the page."
+                    )
 
             # Prepare messages for AI with enhanced context
             system_content = f"""{settings.SYSTEM_PROMPT}
@@ -528,13 +819,16 @@ Here are the relevant notes and their context:
 
             # Process the stream
             current_content = ""
+            # Serialize sources once for all responses
+            serialized_sources = self._serialize_sources_for_json(prioritized_results)
+            
             async for chunk in stream:
                 if chunk.choices[0].delta.content is not None:
                     content_delta = chunk.choices[0].delta.content
                     current_content += content_delta
                     yield ChatResponse(
                         content=content_delta,
-                        sources=prioritized_results,  # Use prioritized results
+                        sources=serialized_sources,  # Use serialized sources
                         thread_id=thread_id or UUID(int=0),
                         done=False
                     )
@@ -546,19 +840,23 @@ Here are the relevant notes and their context:
                         thread_id,
                         "assistant",
                         current_content,
-                        sources=prioritized_results  # Use prioritized results
+                        sources=serialized_sources  # Use serialized sources
                     )
                 except Exception as e:
-                    logger.warning(f"Non-critical error saving assistant message: {e}")
+                    logger.error(f"Error saving assistant message: {e}")
+                    # Don't fail the entire request, but log the error
+                    # The user will still get their response, just won't be saved
 
             # Yield final message
             yield ChatResponse(
                 content="",  # Don't send content in final message
-                sources=prioritized_results,  # Use prioritized results
+                sources=serialized_sources,  # Use serialized sources
                 thread_id=thread_id or UUID(int=0),
                 done=True
             )
 
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error processing message: {e}")
             raise HTTPException(

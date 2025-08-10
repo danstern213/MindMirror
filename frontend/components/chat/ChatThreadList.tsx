@@ -5,7 +5,7 @@ import { format } from 'date-fns';
 interface ChatThreadListProps {
   threads: ChatThread[];
   currentThreadId?: string;
-  onSelectThread: (thread: ChatThread) => void;
+  onSelectThread: (thread: ChatThread) => Promise<void>;
   onCreateThread: () => void;
 }
 
@@ -49,7 +49,13 @@ export function ChatThreadList({
             return (
               <li key={thread.id}>
                 <button
-                  onClick={() => onSelectThread(thread)}
+                  onClick={async () => {
+                    try {
+                      await onSelectThread(thread);
+                    } catch (error) {
+                      console.error('Error selecting thread:', error);
+                    }
+                  }}
                   className={`w-full flex flex-col items-start px-3 py-2 text-sm rounded-sm border ${
                     currentThreadId === thread.id
                       ? 'bg-[var(--paper-texture)] text-[var(--primary-dark)] border-[var(--primary-green)]'

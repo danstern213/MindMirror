@@ -3,7 +3,7 @@ from fastapi.responses import StreamingResponse
 from typing import List, AsyncGenerator
 from uuid import UUID
 
-from ...models.chat import ChatThread, ChatRequest, ChatResponse, StreamingChatResponse
+from ...models.chat import ChatThread, ChatRequest, ChatResponse, StreamingChatResponse, Message
 from ...services.chat_service import ChatService
 from ...core.deps import get_user_id_from_supabase, get_chat_service
 from ...core.config import get_settings
@@ -84,6 +84,24 @@ async def delete_thread(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete thread: {str(e)}"
+        )
+
+@router.get("/threads/{thread_id}/messages")
+async def get_thread_messages(
+    thread_id: UUID,
+    current_user_id: UUID = Depends(get_user_id_from_supabase),
+    service: ChatService = Depends(get_chat_service)
+) -> List[Message]:
+    """Get all messages for a specific chat thread (lazy loading)."""
+    try:
+        messages = await service.get_thread_messages(thread_id, current_user_id)
+        return messages
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load thread messages: {str(e)}"
         )
 
 @router.post("/message")

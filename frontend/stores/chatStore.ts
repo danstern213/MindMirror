@@ -13,13 +13,14 @@ interface ChatState {
   isStreaming: boolean;
   fetchThreads: () => Promise<void>;
   createThread: (title?: string) => Promise<void>;
-  setCurrentThread: (thread: ChatThread) => void;
+  setCurrentThread: (thread: ChatThread) => Promise<void>;
   deleteThread: (threadId: string) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   appendMessage: (message: Message) => void;
   appendStreamToken: (content: string) => void;
   setProcessingStatus: (status: string) => void;
   setSearchProgress: (progress: number) => void;
+  loadThreadMessages: (threadId: string) => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -68,8 +69,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  setCurrentThread: (thread: ChatThread) => {
-    set({ currentThread: thread });
+  setCurrentThread: async (thread: ChatThread) => {
+    set({ currentThread: thread, loading: true, error: null });
+    
+    try {
+      // Lazy load messages for the selected thread
+      const messages = await api.getThreadMessages(thread.id);
+      
+      // Update the thread with loaded messages
+      const updatedThread = {
+        ...thread,
+        messages: messages.map((msg: any) => ({
+          role: msg.role,
+          content: msg.content,
+          timestamp: msg.created_at,
+          sources: msg.sources || []
+        }))
+      };
+      
+      set(state => ({
+        currentThread: updatedThread,
+        threads: state.threads.map(t =>
+          t.id === updatedThread.id ? updatedThread : t
+        ),
+        loading: false
+      }));
+    } catch (error: any) {
+      console.error('Error loading thread messages:', error);
+      set({ 
+        error: error.message || 'Failed to load chat messages. Please refresh the page and try again.',
+        loading: false 
+      });
+      
+      // Still set the thread but with empty messages so user can see the error
+      set({ currentThread: { ...thread, messages: [] } });
+    }
   },
 
   deleteThread: async (threadId: string) => {
@@ -247,5 +281,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
         )
       };
     });
+  },
+
+  loadThreadMessages: async (threadId: string) => {
+    set({ loading: true, error: null });
+    try {
+      const messages = await api.getThreadMessages(threadId);
+      
+      // Update the current thread with loaded messages
+      set(state => {
+        if (!state.currentThread || state.currentThread.id !== threadId) return state;
+        
+        const updatedThread = {
+          ...state.currentThread,
+          messages: messages.map((msg: any) => ({
+            role: msg.role,
+            content: msg.content,
+            timestamp: msg.created_at,
+            sources: msg.sources || []
+          }))
+        };
+        
+        return {
+          currentThread: updatedThread,
+          threads: state.threads.map(t =>
+            t.id === updatedThread.id ? updatedThread : t
+          ),
+          loading: false
+        };
+      });
+    } catch (error: any) {
+      console.error('Error loading thread messages:', error);
+      set({ 
+        error: error.message || 'Failed to load chat messages. Please refresh the page and try again.',
+        loading: false 
+      });
+    }
   }
 })); 

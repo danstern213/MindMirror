@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { ChatMessage } from './ChatMessage';
@@ -38,20 +38,37 @@ export function ChatInterface() {
   const { user, logout } = useAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const hasInitialized = useRef(false);
 
-  // Auto-create thread when no threads exist
+  // Initialize chat when user is authenticated - only run once per session
   useEffect(() => {
-    const createInitialThread = async () => {
-      if (user && !loading && threads.length === 0 && !error) {
+    if (user && !loading && !hasInitialized.current) {
+      hasInitialized.current = true;
+      
+      const initializeChat = async () => {
         try {
-          await createThread("New Chat");
+          // First fetch existing threads
+          await fetchThreads();
+          
+          // Get the current state after fetching
+          const currentState = useChatStore.getState();
+          
+          if (currentState.threads.length === 0) {
+            // No existing threads, create a new one
+            await createThread("New Chat");
+          } else {
+            // Set the first thread as current so user sees something
+            const firstThread = currentState.threads[0];
+            await setCurrentThread(firstThread);
+          }
         } catch (error) {
-          console.error('Error creating initial thread:', error);
+          console.error('Error initializing chat:', error);
         }
-      }
-    };
-    createInitialThread();
-  }, [user, loading, threads.length, createThread, error]);
+      };
+      
+      initializeChat();
+    }
+  }, [user, loading, fetchThreads, createThread, setCurrentThread]);
 
   const handleCreateThread = async () => {
     try {
@@ -123,7 +140,13 @@ export function ChatInterface() {
           <ChatThreadList
             threads={threads}
             currentThreadId={currentThread?.id}
-            onSelectThread={setCurrentThread}
+            onSelectThread={async (thread) => {
+              try {
+                await setCurrentThread(thread);
+              } catch (error) {
+                console.error('Error selecting thread:', error);
+              }
+            }}
             onCreateThread={handleCreateThread}
           />
         </div>
@@ -136,7 +159,12 @@ export function ChatInterface() {
           <div className="max-w-4xl mx-auto">
             {currentThread ? (
               <>
-                {currentThread.messages.length > 0 ? (
+                {loading && currentThread.messages.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center px-4 py-16 text-center animate-fadeIn">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--primary-accent)] mb-4"></div>
+                    <p className="text-[var(--primary-dark)] font-serif">Loading chat messages...</p>
+                  </div>
+                ) : currentThread.messages.length > 0 ? (
                   <>
                     {currentThread.messages.map((message, index) => (
                       <ChatMessage 
