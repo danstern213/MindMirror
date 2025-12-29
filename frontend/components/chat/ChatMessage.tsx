@@ -41,10 +41,11 @@ const MarkdownElement = ({ tag: Tag, className, children }: { tag: any, classNam
       return processBracketedText(child);
     }
     if (React.isValidElement(child)) {
+      const props = child.props as Record<string, any>;
       return React.cloneElement(child, {
-        ...child.props,
-        children: processChildren(child.props.children)
-      });
+        ...props,
+        children: processChildren(props.children)
+      } as any);
     }
     if (Array.isArray(child)) {
       return child.map((c, i) => <React.Fragment key={i}>{processChildren(c)}</React.Fragment>);
