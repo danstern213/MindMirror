@@ -1,6 +1,8 @@
 import { ChatResponse, ChatThread, FileUpload, SearchResult, UserSettings } from '@/types';
 import { supabase } from './supabase';
 
+// Ensure NEXT_PUBLIC_API_URL is set in Vercel environment variables
+// For production, this should point to your backend API (e.g., Heroku, Railway, etc.)
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
 class ApiClient {
@@ -204,7 +206,11 @@ class ApiClient {
   }
 
   async *streamMessage(message: string, threadId?: string): AsyncGenerator<ChatResponse> {
-    console.log('[FRONTEND] streamMessage called', { message: message.substring(0, 50), threadId });
+    console.log('[FRONTEND] streamMessage called', { 
+      message: message.substring(0, 50), 
+      threadId,
+      apiBase: API_BASE 
+    });
     
     // Get the session to include user_id
     const { data: { session } } = await supabase.auth.getSession();
@@ -214,26 +220,50 @@ class ApiClient {
     }
 
     console.log('[FRONTEND] Making POST request to /chat/message');
-    const response = await this.fetch('/chat/message', {
-      method: 'POST',
-      body: JSON.stringify({
-        message,
-        thread_id: threadId,
-        user_id: session.user.id
-      }),
-    });
+    let response: Response;
+    try {
+      response = await this.fetch('/chat/message', {
+        method: 'POST',
+        body: JSON.stringify({
+          message,
+          thread_id: threadId,
+          user_id: session.user.id
+        }),
+      });
+    } catch (error) {
+      console.error('[FRONTEND] Failed to initiate stream request:', error);
+      // Check if API URL is configured
+      if (API_BASE.includes('localhost')) {
+        console.error('[FRONTEND] WARNING: Using localhost API URL. Make sure NEXT_PUBLIC_API_URL is set in Vercel environment variables.');
+      }
+      throw error;
+    }
 
     console.log('[FRONTEND] Response received', { 
       status: response.status, 
       statusText: response.statusText,
       headers: Object.fromEntries(response.headers.entries()),
-      hasBody: !!response.body 
+      hasBody: !!response.body,
+      contentType: response.headers.get('content-type')
     });
+
+    // Check if response is OK
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      console.error('[FRONTEND] Response not OK:', { status: response.status, errorText });
+      throw new Error(`Stream request failed: ${response.status} ${response.statusText}. ${errorText}`);
+    }
+
+    // Verify it's a streaming response
+    const contentType = response.headers.get('content-type');
+    if (contentType && !contentType.includes('text/event-stream')) {
+      console.warn('[FRONTEND] Unexpected content type:', contentType);
+    }
 
     const reader = response.body?.getReader();
     if (!reader) {
       console.error('[FRONTEND] No response body reader available');
-      throw new Error('No response body');
+      throw new Error('No response body - server may not support streaming');
     }
 
     console.log('[FRONTEND] Reader created, starting to read stream');

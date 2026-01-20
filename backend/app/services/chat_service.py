@@ -809,16 +809,47 @@ Here are the relevant notes and their context:
             # Get the chat completion stream
             logger.info(f"[PROCESS_MESSAGE] Calling OpenAI API - model: {settings.OPENAI_MODEL}, message_count: {len(messages)}, token_count: {token_count}")
             try:
-                stream = await self.openai_client.chat.completions.create(
-                    model=settings.OPENAI_MODEL,
-                    messages=messages,
-                    temperature=0.7,
-                    max_tokens=4000,
-                    top_p=1,
-                    frequency_penalty=0,
-                    presence_penalty=0,
-                    stream=True
-                )
+                # GPT-5 models require max_completion_tokens instead of max_tokens
+                model_lower = settings.OPENAI_MODEL.lower()
+                is_gpt5 = "gpt-5" in model_lower or "chatgpt-5" in model_lower
+                
+                # Build the API call parameters - different for GPT-5 vs older models
+                api_params = {
+                    "model": settings.OPENAI_MODEL,
+                    "messages": messages,
+                    "stream": True
+                }
+                
+                # Use the correct parameters based on model version
+                if is_gpt5:
+                    # GPT-5 models have restrictions:
+                    # - Use max_completion_tokens instead of max_tokens
+                    # - Don't support temperature, top_p, frequency_penalty, presence_penalty
+                    #   (these are only allowed when reasoning.effort="none", which is not the default)
+                    try:
+                        api_params["max_completion_tokens"] = 4000
+                        stream = await self.openai_client.chat.completions.create(**api_params)
+                    except TypeError as e:
+                        # SDK version is too old and doesn't support max_completion_tokens
+                        # Omit the parameter - API will use its default max_completion_tokens
+                        logger.warning(
+                            f"OpenAI SDK doesn't support max_completion_tokens. "
+                            f"Omitting parameter for {settings.OPENAI_MODEL}. "
+                            f"Please upgrade SDK: pip install --upgrade openai"
+                        )
+                        api_params.pop("max_completion_tokens", None)
+                        stream = await self.openai_client.chat.completions.create(**api_params)
+                else:
+                    # For older models, use standard parameters
+                    api_params.update({
+                        "temperature": 0.7,
+                        "top_p": 1,
+                        "frequency_penalty": 0,
+                        "presence_penalty": 0,
+                        "max_tokens": 4000
+                    })
+                    stream = await self.openai_client.chat.completions.create(**api_params)
+                
                 logger.info("[PROCESS_MESSAGE] OpenAI stream created successfully")
             except Exception as e:
                 logger.error(f"[PROCESS_MESSAGE] Failed to create OpenAI stream: {e}", exc_info=True)

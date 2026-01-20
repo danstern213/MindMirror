@@ -20,15 +20,34 @@ def count_tokens(messages: List[Dict[str, Any]], model: str = "gpt-4o") -> int:
         model_for_encoding = model.lower()
         
         # Map OpenAI model names to tiktoken model names
-        if "chatgpt-4" in model_for_encoding or "gpt-4" in model_for_encoding:
+        if "gpt-5" in model_for_encoding or "chatgpt-5" in model_for_encoding:
+            # GPT-5 models - try o200k_base first, fall back to cl100k_base if not available
+            # Note: o200k_base may not be available in all tiktoken versions
+            try:
+                encoding = tiktoken.get_encoding("o200k_base")
+                logger.debug(f"Using o200k_base encoding for model {model}")
+            except (KeyError, ValueError):
+                # Fall back to cl100k_base if o200k_base is not available
+                encoding = tiktoken.get_encoding("cl100k_base")
+                logger.debug(f"o200k_base not available, using cl100k_base encoding for model {model}")
+        elif "chatgpt-4" in model_for_encoding or "gpt-4" in model_for_encoding:
             model_for_encoding = "gpt-4"
+            encoding = tiktoken.encoding_for_model(model_for_encoding)
         elif "gpt-3.5" in model_for_encoding:
             model_for_encoding = "gpt-3.5-turbo"
-            
-        encoding = tiktoken.encoding_for_model(model_for_encoding)
-    except KeyError:
-        logger.warning(f"Model {model} not found. Using cl100k_base encoding.")
-        encoding = tiktoken.get_encoding("cl100k_base")
+            encoding = tiktoken.encoding_for_model(model_for_encoding)
+        else:
+            # Try to get encoding for the model directly
+            encoding = tiktoken.encoding_for_model(model_for_encoding)
+    except (KeyError, ValueError):
+        # For unknown models, try o200k_base (common for newer models) then fall back to cl100k_base
+        try:
+            encoding = tiktoken.get_encoding("o200k_base")
+            logger.debug(f"Model {model} not found in tiktoken registry. Using o200k_base encoding.")
+        except (KeyError, ValueError):
+            # Final fallback to cl100k_base
+            encoding = tiktoken.get_encoding("cl100k_base")
+            logger.debug(f"Model {model} not found in tiktoken registry. Using cl100k_base encoding.")
     
     num_tokens = 0
     for message in messages:

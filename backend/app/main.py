@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import logging
 import traceback
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from .core.config import get_settings
 from .api.routes import router as api_router
@@ -51,11 +51,13 @@ async def log_requests(request: Request, call_next):
 async def add_keep_alive_header(request: Request, call_next):
     """Add keep-alive headers to improve streaming performance"""
     response = await call_next(request)
-    response.headers.update({
-        "Connection": "keep-alive",
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no"
-    })
+    # Only update headers if not already set (StreamingResponse sets its own headers)
+    if not isinstance(response, StreamingResponse):
+        response.headers.update({
+            "Connection": "keep-alive",
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no"
+        })
     return response
 
 # Configure CORS
@@ -67,10 +69,11 @@ app.add_middleware(
         "https://ainotecopilot.com",
         "https://www.ainotecopilot.com"  # New production domain
     ],
+    allow_origin_regex=r"https://.*\.vercel\.app",  # Allow all Vercel preview deployments
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"],
-    expose_headers=["Content-Length"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With", "Cache-Control"],
+    expose_headers=["Content-Length", "Content-Type", "Cache-Control", "Connection", "X-Accel-Buffering"],
     max_age=600,
 )
 
