@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from typing import List, AsyncGenerator
 from uuid import UUID
+import logging
 
 from ...models.chat import ChatThread, ChatRequest, ChatResponse, StreamingChatResponse, Message
 from ...services.chat_service import ChatService
@@ -10,6 +11,7 @@ from ...core.config import get_settings
 
 router = APIRouter()
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 @router.post("/threads", status_code=status.HTTP_201_CREATED)
 async def create_thread(
@@ -112,7 +114,10 @@ async def send_message(
 ) -> StreamingResponse:
     """Send a message and get a streaming response."""
     try:
+        logger.info(f"[MESSAGE] send_message called - user_id: {current_user_id}, thread_id: {request.thread_id}, message_preview: {request.message[:50] if request.message else 'None'}...")
+        
         if request.user_id != current_user_id:
+            logger.warning(f"[MESSAGE] Authorization failed - request.user_id: {request.user_id}, current_user_id: {current_user_id}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to send messages for other users"
@@ -120,6 +125,7 @@ async def send_message(
             
         # Validate message content
         if not request.message or not request.message.strip():
+            logger.warning("[MESSAGE] Empty message received")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Message content cannot be empty"
@@ -127,23 +133,40 @@ async def send_message(
             
         # Check message length
         if len(request.message) > 4000:  # Reasonable limit for message length
+            logger.warning(f"[MESSAGE] Message too long: {len(request.message)} characters")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Message too long. Please keep messages under 4000 characters."
             )
-            
-        async def stream_response() -> AsyncGenerator[str, None]:
-            async for chunk in service.process_message(
-                content=request.message,
-                thread_id=request.thread_id,
-                user_id=current_user_id
-            ):
-                yield f"data: {chunk.model_dump_json()}\n\n"
-            yield "data: [DONE]\n\n"
         
+        logger.info("[MESSAGE] Creating stream_response generator")
+        async def stream_response() -> AsyncGenerator[str, None]:
+            chunk_count = 0
+            try:
+                logger.info("[MESSAGE] Starting to iterate over process_message generator")
+                async for chunk in service.process_message(
+                    content=request.message,
+                    thread_id=request.thread_id,
+                    user_id=current_user_id
+                ):
+                    chunk_count += 1
+                    logger.debug(f"[MESSAGE] Yielding chunk #{chunk_count}, content_length: {len(chunk.content) if chunk.content else 0}")
+                    yield f"data: {chunk.model_dump_json()}\n\n"
+                logger.info(f"[MESSAGE] Finished iterating - total chunks: {chunk_count}, sending [DONE]")
+                yield "data: [DONE]\n\n"
+            except Exception as e:
+                logger.error(f"[MESSAGE] Error in stream_response generator: {e}", exc_info=True)
+                raise
+        
+        logger.info("[MESSAGE] Returning StreamingResponse")
         return StreamingResponse(
             stream_response(),
-            media_type="text/event-stream"
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
         )
         
     except HTTPException:

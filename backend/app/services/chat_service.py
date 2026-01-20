@@ -596,6 +596,7 @@ class ChatService:
         user_id: UUID
     ) -> AsyncGenerator[ChatResponse, None]:
         """Process a user message and generate a response."""
+        logger.info(f"[PROCESS_MESSAGE] process_message started - user_id: {user_id}, thread_id: {thread_id}, content_preview: {content[:50]}...")
         try:
             # Get user settings
             user_settings = self.get_user_settings(user_id)
@@ -806,32 +807,73 @@ Here are the relevant notes and their context:
                     logger.info(f"Final message token count after truncation: {token_count}")
             
             # Get the chat completion stream
-            stream = await self.openai_client.chat.completions.create(
-                model=settings.OPENAI_MODEL,
-                messages=messages,
-                temperature=0.7,
-                max_tokens=4000,
-                top_p=1,
-                frequency_penalty=0,
-                presence_penalty=0,
-                stream=True
-            )
+            logger.info(f"[PROCESS_MESSAGE] Calling OpenAI API - model: {settings.OPENAI_MODEL}, message_count: {len(messages)}, token_count: {token_count}")
+            try:
+                stream = await self.openai_client.chat.completions.create(
+                    model=settings.OPENAI_MODEL,
+                    messages=messages,
+                    temperature=0.7,
+                    max_tokens=4000,
+                    top_p=1,
+                    frequency_penalty=0,
+                    presence_penalty=0,
+                    stream=True
+                )
+                logger.info("[PROCESS_MESSAGE] OpenAI stream created successfully")
+            except Exception as e:
+                logger.error(f"[PROCESS_MESSAGE] Failed to create OpenAI stream: {e}", exc_info=True)
+                raise
 
             # Process the stream
             current_content = ""
             # Serialize sources once for all responses
             serialized_sources = self._serialize_sources_for_json(prioritized_results)
             
-            async for chunk in stream:
-                if chunk.choices[0].delta.content is not None:
-                    content_delta = chunk.choices[0].delta.content
-                    current_content += content_delta
-                    yield ChatResponse(
-                        content=content_delta,
-                        sources=serialized_sources,  # Use serialized sources
-                        thread_id=thread_id or UUID(int=0),
-                        done=False
-                    )
+            # Yield an initial status message to let the frontend know streaming has started
+            # This prevents the frontend from hanging while waiting for the first chunk
+            logger.info("[PROCESS_MESSAGE] Yielding initial status message")
+            yield ChatResponse(
+                content="",  # Empty content for status update
+                sources=serialized_sources,
+                thread_id=thread_id or UUID(int=0),
+                done=False
+            )
+            
+            chunk_count = 0
+            logger.info("[PROCESS_MESSAGE] Starting to iterate over OpenAI stream")
+            first_chunk_received = False
+            try:
+                async for chunk in stream:
+                    chunk_count += 1
+                    if not first_chunk_received:
+                        first_chunk_received = True
+                        logger.info(f"[PROCESS_MESSAGE] First chunk received (#{chunk_count})")
+                    
+                    if chunk.choices and len(chunk.choices) > 0:
+                        if chunk.choices[0].delta.content is not None:
+                            content_delta = chunk.choices[0].delta.content
+                            current_content += content_delta
+                            logger.debug(f"[PROCESS_MESSAGE] Received chunk #{chunk_count}, delta_length: {len(content_delta)}, total_content_length: {len(current_content)}")
+                            yield ChatResponse(
+                                content=content_delta,
+                                sources=serialized_sources,  # Use serialized sources
+                                thread_id=thread_id or UUID(int=0),
+                                done=False
+                            )
+                        else:
+                            logger.debug(f"[PROCESS_MESSAGE] Chunk #{chunk_count} has no content delta")
+                    else:
+                        logger.warning(f"[PROCESS_MESSAGE] Chunk #{chunk_count} has no choices")
+                
+                if not first_chunk_received:
+                    logger.warning("[PROCESS_MESSAGE] Stream completed but no chunks were received")
+                else:
+                    logger.info(f"[PROCESS_MESSAGE] Stream iteration complete - total chunks: {chunk_count}, final content length: {len(current_content)}")
+            except Exception as e:
+                logger.error(f"[PROCESS_MESSAGE] Error iterating over stream: {e}", exc_info=True)
+                if not first_chunk_received:
+                    logger.error("[PROCESS_MESSAGE] Stream failed before receiving any chunks - this may indicate a connection or API issue")
+                raise
 
             # Save the assistant's message to the thread if we have one
             if thread_id:

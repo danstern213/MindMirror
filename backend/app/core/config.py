@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     
     # OpenAI
     OPENAI_API_KEY: str
-    OPENAI_MODEL: str = "gpt-5-nano-2025-08-07"
+    OPENAI_MODEL: str = "chatgpt-4o-latest"
     EMBEDDING_MODEL: str = "text-embedding-ada-002"
     
     # CORS

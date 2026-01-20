@@ -180,18 +180,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         simulateSearchProgress();
 
         for await (const chunk of api.streamMessage(content, currentThread?.id)) {
+          // If we receive any chunk (even with empty content), it means streaming has started
+          // Update status to indicate we're generating the response
+          if (get().processingStatus === 'Searching documents...') {
+            setProcessingStatus('Generating response...');
+            setSearchProgress(0);
+            isSearching = false; // Stop the search progress simulation
+          }
+          
           if (chunk.content) {
-            // Stop the search progress simulation when we get the first content chunk
-            isSearching = false;
-            
-            if (get().processingStatus === 'Searching documents...') {
-              setProcessingStatus('Analyzing context...');
-              setSearchProgress(0); // Reset for next phase
-            }
-            if (get().processingStatus === 'Analyzing context...') {
-              setProcessingStatus('Generating response...');
-            }
-
             // Update immediately without accumulating
             set(state => {
               if (!state.currentThread) return state;
@@ -202,6 +199,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 if (chunk.sources) {
                   lastMessage.sources = chunk.sources;
                 }
+              }
+              return {
+                currentThread: {
+                  ...state.currentThread,
+                  messages
+                }
+              };
+            });
+          } else if (chunk.sources && !chunk.done) {
+            // If we get sources but no content yet, update the message with sources
+            // This indicates the stream has started and we have context
+            set(state => {
+              if (!state.currentThread) return state;
+              const messages = [...state.currentThread.messages];
+              const lastMessage = messages[messages.length - 1];
+              if (lastMessage && lastMessage.role === 'assistant' && chunk.sources) {
+                lastMessage.sources = chunk.sources;
               }
               return {
                 currentThread: {

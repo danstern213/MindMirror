@@ -204,12 +204,16 @@ class ApiClient {
   }
 
   async *streamMessage(message: string, threadId?: string): AsyncGenerator<ChatResponse> {
+    console.log('[FRONTEND] streamMessage called', { message: message.substring(0, 50), threadId });
+    
     // Get the session to include user_id
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) {
+      console.error('[FRONTEND] No active session');
       throw new Error('No active session');
     }
 
+    console.log('[FRONTEND] Making POST request to /chat/message');
     const response = await this.fetch('/chat/message', {
       method: 'POST',
       body: JSON.stringify({
@@ -219,28 +223,51 @@ class ApiClient {
       }),
     });
 
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('No response body');
+    console.log('[FRONTEND] Response received', { 
+      status: response.status, 
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries()),
+      hasBody: !!response.body 
+    });
 
+    const reader = response.body?.getReader();
+    if (!reader) {
+      console.error('[FRONTEND] No response body reader available');
+      throw new Error('No response body');
+    }
+
+    console.log('[FRONTEND] Reader created, starting to read stream');
     const decoder = new TextDecoder();
     let buffer = '';
+    let chunkCount = 0;
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        console.log(`[FRONTEND] Stream done - total chunks read: ${chunkCount}, final buffer length: ${buffer.length}`);
+        break;
+      }
 
-      buffer += decoder.decode(value, { stream: true });
+      chunkCount++;
+      const decoded = decoder.decode(value, { stream: true });
+      console.log(`[FRONTEND] Chunk #${chunkCount} received, length: ${decoded.length}`);
+      buffer += decoded;
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
 
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           const data = line.slice(6);
-          if (data === '[DONE]') return;
+          if (data === '[DONE]') {
+            console.log('[FRONTEND] Received [DONE] marker');
+            return;
+          }
           try {
-            yield JSON.parse(data) as ChatResponse;
+            const parsed = JSON.parse(data) as ChatResponse;
+            console.log(`[FRONTEND] Parsed SSE data - content_length: ${parsed.content?.length || 0}, done: ${parsed.done}`);
+            yield parsed;
           } catch (e) {
-            console.error('Error parsing SSE data:', e);
+            console.error('[FRONTEND] Error parsing SSE data:', e, { line, data });
           }
         }
       }
