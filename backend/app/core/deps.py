@@ -12,6 +12,7 @@ from ..services.search_service import SearchService
 from ..services.upload_service import UploadService
 from ..services.chat_service import ChatService
 from ..services.embedding_service import EmbeddingService
+from ..services.api_key_service import APIKeyService
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -112,6 +113,33 @@ async def get_user_id_from_supabase(request: Request, client: Client = Depends(g
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Authentication failed: {str(e)}"
         )
+
+async def get_user_id_from_auth(request: Request, client: Client = Depends(get_supabase_client)) -> UUID:
+    """
+    Get user ID from either API key or JWT token.
+
+    Checks X-API-Key header first, then falls back to Authorization: Bearer JWT.
+    This allows both long-lived API keys (for services like WhatsApp bridge)
+    and short-lived JWT tokens (for web app) to authenticate.
+    """
+    # Check for API key first
+    api_key = request.headers.get('X-API-Key')
+    if api_key:
+        api_key_service = APIKeyService(client)
+        user_id = await api_key_service.validate_api_key(api_key)
+        if user_id:
+            return user_id
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired API key"
+        )
+
+    # Fall back to JWT auth
+    return await get_user_id_from_supabase(request, client)
+
+def get_api_key_service(client: Client = Depends(get_supabase_client)) -> APIKeyService:
+    """Get API key service instance."""
+    return APIKeyService(client)
 
 def get_settings_service(client: Client = Depends(get_supabase_client)) -> SettingsService:
     """Get settings service instance."""

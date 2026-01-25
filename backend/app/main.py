@@ -72,7 +72,7 @@ app.add_middleware(
     allow_origin_regex=r"https://.*\.vercel\.app",  # Allow all Vercel preview deployments
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With", "Cache-Control"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With", "Cache-Control", "X-API-Key"],
     expose_headers=["Content-Length", "Content-Type", "Cache-Control", "Connection", "X-Accel-Buffering"],
     max_age=600,
 )

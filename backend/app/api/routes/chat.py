@@ -6,7 +6,7 @@ import logging
 
 from ...models.chat import ChatThread, ChatRequest, ChatResponse, StreamingChatResponse, Message
 from ...services.chat_service import ChatService
-from ...core.deps import get_user_id_from_supabase, get_chat_service
+from ...core.deps import get_user_id_from_supabase, get_user_id_from_auth, get_chat_service
 from ...core.config import get_settings
 
 router = APIRouter()
@@ -109,7 +109,7 @@ async def get_thread_messages(
 @router.post("/message")
 async def send_message(
     request: ChatRequest,
-    current_user_id: UUID = Depends(get_user_id_from_supabase),
+    current_user_id: UUID = Depends(get_user_id_from_auth),
     service: ChatService = Depends(get_chat_service)
 ) -> StreamingResponse:
     """Send a message and get a streaming response."""
