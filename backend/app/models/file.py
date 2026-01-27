@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, date
 from uuid import UUID
 
 class FileBase(BaseModel):
@@ -9,10 +9,13 @@ class FileBase(BaseModel):
     storage_path: str = Field(description="Path in Supabase storage")
     user_id: UUID = Field(description="ID of the user who owns this file")
     status: str = Field(description="Status of the file: pending_embedding, indexed, failed")
+    document_date: Optional[date] = Field(default=None, description="Date extracted from filename for temporal search")
+    date_source: Optional[str] = Field(default=None, description="Source of document_date: filename, content, or created_at")
 
     class Config:
         json_encoders = {
-            UUID: str  # Convert UUID to string when serializing
+            UUID: str,  # Convert UUID to string when serializing
+            date: lambda v: v.isoformat() if v else None  # Convert date to ISO string
         }
 
 class FileCreate(FileBase):
@@ -20,6 +23,9 @@ class FileCreate(FileBase):
         data = super().model_dump(**kwargs)
         # Ensure UUID is converted to string
         data['user_id'] = str(data['user_id'])
+        # Convert date to ISO string for database
+        if data.get('document_date'):
+            data['document_date'] = data['document_date'].isoformat()
         return data
 
 class FileDB(FileBase):
@@ -32,6 +38,9 @@ class FileDB(FileBase):
         # Ensure UUIDs are converted to strings
         data['id'] = str(data['id'])
         data['user_id'] = str(data['user_id'])
+        # Convert date to ISO string
+        if data.get('document_date'):
+            data['document_date'] = data['document_date'].isoformat() if hasattr(data['document_date'], 'isoformat') else data['document_date']
         return data
 
 class EmbeddingCreate(BaseModel):

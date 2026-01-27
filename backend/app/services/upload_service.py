@@ -7,6 +7,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 from supabase import Client, create_client
 from .embedding_service import EmbeddingService
+from .date_extraction_service import DateExtractionService
 from ..models.file import FileCreate, FileDB, FileUploadResponse
 from ..core.config import get_settings
 import logging
@@ -21,7 +22,8 @@ class UploadService:
     def __init__(
         self,
         supabase_client: Optional[Client] = None,
-        embedding_service: Optional[EmbeddingService] = None
+        embedding_service: Optional[EmbeddingService] = None,
+        date_extraction_service: Optional[DateExtractionService] = None
     ):
         """Initialize the upload service."""
         self.supabase = supabase_client or create_client(
@@ -29,6 +31,7 @@ class UploadService:
             settings.SUPABASE_KEY
         )
         self.embedding_service = embedding_service or EmbeddingService(self.supabase)
+        self.date_extraction_service = date_extraction_service or DateExtractionService()
 
     def _extract_text_from_pdf(self, content: bytes) -> str:
         """Extract text from PDF content."""
@@ -243,6 +246,15 @@ class UploadService:
                     detail=f"Failed to upload to storage: {str(e)}"
                 )
 
+            # Extract document date from filename
+            extracted_date = self.date_extraction_service.extract_date_from_filename(file.filename)
+            document_date = None
+            date_source = None
+            if extracted_date:
+                document_date = extracted_date.date
+                date_source = extracted_date.source
+                logger.info(f"Extracted date {document_date} from filename (source: {date_source}, confidence: {extracted_date.confidence})")
+
             # Save file metadata
             logger.info("Saving file metadata")
             file_data = FileCreate(
@@ -250,7 +262,9 @@ class UploadService:
                 storage_path=storage_path,
                 title=file.filename,
                 user_id=user_id,
-                status='pending_embedding' if content_size > 0 else 'empty'
+                status='pending_embedding' if content_size > 0 else 'empty',
+                document_date=document_date,
+                date_source=date_source
             )
 
             try:

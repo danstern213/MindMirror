@@ -12,6 +12,7 @@ from ..models.chat import Message, ChatThread, ChatResponse
 from ..models.search import SearchQuery, SearchResult
 from ..services.search_service import SearchService
 from ..services.storage_service import StorageService
+from ..services.date_query_parser import DateQueryParser
 from ..core.config import get_settings
 from ..core.utils import count_tokens, truncate_messages_to_fit_limit
 
@@ -45,7 +46,7 @@ def _parse_datetime_from_db(dt_str: str) -> datetime:
 
 class ChatService:
     """Service for managing chat functionality with database persistence."""
-    
+
     def __init__(
         self,
         supabase: Client,
@@ -56,6 +57,7 @@ class ChatService:
         self.search_service = search_service
         self.storage_service = storage_service
         self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        self.date_query_parser = DateQueryParser()
         # User-specific settings
         self.user_settings: Dict[UUID, Dict[str, str]] = {}
     
@@ -472,18 +474,22 @@ class ChatService:
                 'context': message
             }
 
-    def _generate_context(self, search_results: List[dict]) -> str:
+    def _generate_context(self, search_results: List[dict], temporal_description: Optional[str] = None) -> str:
         """Generate formatted context from search results."""
         referenced_notes = set()
         context_parts = []
-        
+
+        # Add temporal context header if we have a date-based query
+        if temporal_description:
+            context_parts.append(f"[Temporal Query: Looking for notes from {temporal_description}]")
+
         for result in search_results:
             referenced_notes.add(result['title'])
-            
+
             # Determine relevance indicator
             relevance_indicator = "Explicitly Referenced" if result.get('explicit') else \
                 "Highly Relevant" if result['score'] > 0.9 else "Relevant"
-            
+
             # Build context text with detailed metadata
             context_text = f"[From [[{result['title']}]]] ({relevance_indicator}"
             if not result.get('explicit'):
@@ -492,6 +498,13 @@ class ChatService:
                 context_text += f", keyword relevance: {result['keyword_score']:.3f}"
             if result.get('matched_keywords'):
                 context_text += f", matched terms: {', '.join(result['matched_keywords'])}"
+            # Include document date if available
+            if result.get('document_date'):
+                doc_date = result['document_date']
+                if hasattr(doc_date, 'strftime'):
+                    context_text += f", date: {doc_date.strftime('%Y-%m-%d')}"
+                else:
+                    context_text += f", date: {doc_date}"
             context_text += f")\n\nRelevant Section:\n{result['content']}"
 
             context_parts.append(context_text)
@@ -606,9 +619,21 @@ class ChatService:
                 'is_follow_up': False,
                 'context': ''
             }
-            
-            # Perform semantic search
-            search_query = SearchQuery(query=content, user_id=user_id)
+
+            # Parse query for temporal intent
+            parsed_query = self.date_query_parser.parse_query(content)
+            temporal_description = None
+            if parsed_query.has_temporal_intent:
+                logger.info(f"Detected temporal query: {parsed_query.temporal_description} (range: {parsed_query.date_range})")
+                temporal_description = parsed_query.temporal_description
+
+            # Perform semantic search with date filtering if applicable
+            search_query = SearchQuery(
+                query=parsed_query.clean_query if parsed_query.has_temporal_intent else content,
+                user_id=user_id,
+                date_start=parsed_query.date_range.start if parsed_query.date_range else None,
+                date_end=parsed_query.date_range.end if parsed_query.date_range else None
+            )
             semantic_results = await self.search_service.search(search_query)
             
             # Get explicitly referenced notes
@@ -623,9 +648,9 @@ class ChatService:
             # Prioritize results to fit within token budget before generating context
             # Use a lower budget to leave room for system message and conversation
             prioritized_results = self._prioritize_search_results(all_results, token_budget=20000)
-            
+
             # Generate context using prioritized results
-            context = self._generate_context(prioritized_results)
+            context = self._generate_context(prioritized_results, temporal_description)
 
             # If we have a thread, add the user message to it
             if thread_id:
