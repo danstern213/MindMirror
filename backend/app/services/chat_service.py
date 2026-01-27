@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any, AsyncGenerator
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from uuid import UUID, uuid4
 import logging
 import json
@@ -520,20 +520,22 @@ class ChatService:
         return context
 
     def _serialize_sources_for_json(self, sources: List[dict]) -> List[dict]:
-        """Convert sources to JSON-serializable format by converting UUIDs to strings."""
+        """Convert sources to JSON-serializable format by converting UUIDs and dates to strings."""
         if not sources:
             return []
-        
+
         serializable_sources = []
         for source in sources:
             serializable_source = {}
             for key, value in source.items():
                 if isinstance(value, UUID):
                     serializable_source[key] = str(value)
+                elif isinstance(value, date):
+                    serializable_source[key] = value.isoformat()
                 else:
                     serializable_source[key] = value
             serializable_sources.append(serializable_source)
-        
+
         return serializable_sources
 
     def _prioritize_search_results(self, search_results: List[dict], token_budget: int = 20000) -> List[dict]:
