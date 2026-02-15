@@ -407,6 +407,144 @@ class UploadService:
                 detail=f"Error fetching user files: {str(e)}"
             )
 
+    async def delete_file_completely(self, file_id: UUID, user_id: UUID) -> bool:
+        """
+        Completely delete a file and all associated data.
+
+        This removes:
+        1. All embeddings for the file
+        2. The file from Supabase storage
+        3. The file record from the database
+
+        Returns True if successful, raises HTTPException on failure.
+        """
+        try:
+            # First verify the file belongs to the user
+            file_response = self.supabase.table('files')\
+                .select('*')\
+                .eq('id', str(file_id))\
+                .eq('user_id', str(user_id))\
+                .single()\
+                .execute()
+
+            if not file_response.data:
+                raise HTTPException(status_code=404, detail="File not found")
+
+            file_record = FileDB(**file_response.data)
+            logger.info(f"Deleting file completely: {file_record.filename} (id: {file_id})")
+
+            # 1. Delete embeddings for this file
+            try:
+                embed_response = self.supabase.table('embeddings')\
+                    .delete()\
+                    .eq('file_id', str(file_id))\
+                    .execute()
+                logger.info(f"Deleted embeddings for file {file_id}")
+            except Exception as e:
+                logger.warning(f"Error deleting embeddings (may not exist): {str(e)}")
+
+            # 2. Delete from storage
+            try:
+                self.supabase.storage.from_('documents')\
+                    .remove([file_record.storage_path])
+                logger.info(f"Deleted file from storage: {file_record.storage_path}")
+            except Exception as e:
+                logger.warning(f"Error deleting from storage (may not exist): {str(e)}")
+
+            # 3. Delete file record from database
+            try:
+                self.supabase.table('files')\
+                    .delete()\
+                    .eq('id', str(file_id))\
+                    .execute()
+                logger.info(f"Deleted file record from database: {file_id}")
+            except Exception as e:
+                logger.error(f"Error deleting file record: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to delete file record: {str(e)}"
+                )
+
+            return True
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting file {file_id}: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error deleting file: {str(e)}"
+            )
+
+    async def delete_file_by_name(self, filename: str, user_id: UUID) -> bool:
+        """
+        Delete a file by filename for a given user.
+
+        Returns True if file was found and deleted, False if file didn't exist.
+        """
+        try:
+            # Find the file by name
+            response = self.supabase.table('files')\
+                .select('*')\
+                .eq('user_id', str(user_id))\
+                .eq('filename', filename)\
+                .execute()
+
+            if not response.data:
+                logger.info(f"No file found with name {filename} for user {user_id}")
+                return False
+
+            file_record = FileDB(**response.data[0])
+            await self.delete_file_completely(file_record.id, user_id)
+            return True
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting file by name {filename}: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error deleting file: {str(e)}"
+            )
+
+    async def replace_file(
+        self,
+        file: UploadFile,
+        user_id: UUID,
+        api_key: Optional[str] = None
+    ) -> FileUploadResponse:
+        """
+        Replace an existing file with a new version.
+
+        This will:
+        1. Delete the existing file completely (embeddings, storage, record)
+        2. Upload the new file
+        3. Generate new embeddings
+
+        If no existing file is found, performs a normal upload.
+        """
+        try:
+            logger.info(f"Replace file request for: {file.filename}")
+
+            # Delete existing file if it exists
+            deleted = await self.delete_file_by_name(file.filename, user_id)
+            if deleted:
+                logger.info(f"Deleted existing file: {file.filename}")
+            else:
+                logger.info(f"No existing file to delete: {file.filename}")
+
+            # Now perform a fresh upload
+            return await self.save_file(file, user_id, api_key)
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error replacing file {file.filename}: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error replacing file: {str(e)}"
+            )
+
     async def get_file_content(self, file_id: UUID, user_id: UUID) -> str:
         """Get the content of a file."""
         try:
