@@ -38,6 +38,7 @@ yarn-error.log*
 # Local files
 .DS_Store
 *.pem
+*.plist
 
 # IDE
 /.idea/

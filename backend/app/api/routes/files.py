@@ -8,7 +8,7 @@ import traceback
 from ...services.upload_service import UploadService
 from ...models.file import FileDB, FileUploadResponse
 from ...core.config import get_settings
-from ...core.deps import get_user_id_from_supabase, get_upload_service
+from ...core.deps import get_user_id_from_supabase, get_user_id_from_auth, get_upload_service
 
 router = APIRouter()
 settings = get_settings()
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 async def upload_file(
     request: Request,
     file: UploadFile = File(..., description="The file to upload"),
-    current_user_id: UUID = Depends(get_user_id_from_supabase),
+    current_user_id: UUID = Depends(get_user_id_from_auth),
     service: UploadService = Depends(get_upload_service)
 ) -> FileUploadResponse:
     """
@@ -136,12 +136,96 @@ async def upload_file(
             detail=f"Error processing upload: {str(e)}"
         )
 
+@router.put("/replace", response_model=FileUploadResponse)
+async def replace_file(
+    request: Request,
+    file: UploadFile = File(..., description="The file to replace"),
+    current_user_id: UUID = Depends(get_user_id_from_auth),
+    service: UploadService = Depends(get_upload_service)
+) -> FileUploadResponse:
+    """
+    Replace an existing file with a new version.
+
+    This endpoint:
+    1. Deletes any existing file with the same name (including embeddings)
+    2. Uploads the new file
+    3. Generates new embeddings
+
+    Supports both JWT token and API key authentication.
+    If no existing file is found, performs a normal upload.
+    """
+    try:
+        logger.info("=== File Replace Request ===")
+        logger.info(f"Content-Type: {request.headers.get('content-type')}")
+        logger.info(f"User ID: {current_user_id}")
+
+        if file and hasattr(file, 'filename'):
+            logger.info(f"File details: {file.filename}")
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="No valid file received in request"
+            )
+
+        content_type = request.headers.get('content-type', '')
+        if not content_type.startswith('multipart/form-data'):
+            raise HTTPException(
+                status_code=415,
+                detail="Request must be multipart/form-data"
+            )
+
+        # Validate file content
+        content = await file.read()
+        file_size = len(content)
+        logger.info(f"File size: {file_size} bytes")
+        await file.seek(0)
+
+        ext = file.filename.lower().split('.')[-1]
+        if ext not in ['pdf', 'docx', 'doc'] and file_size > 0:
+            try:
+                content[:1024].decode('utf-8')
+            except UnicodeDecodeError:
+                raise HTTPException(
+                    status_code=422,
+                    detail="File content must be valid UTF-8 text"
+                )
+
+        del content
+
+        # Get API key for embedding service if present
+        api_key = request.headers.get('X-API-Key')
+
+        try:
+            response = await service.replace_file(file, current_user_id, api_key)
+            logger.info(f"File replace successful: {response.file_id}")
+            return response
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in replace_file: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Error processing replace: {str(e)}"
+            )
+        finally:
+            await file.close()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in replace_file endpoint: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Error processing replace: {str(e)}"
+        )
+
+
 @router.get("/list", response_model=List[FileDB])
 async def list_files(
-    current_user_id: UUID = Depends(get_user_id_from_supabase),
+    current_user_id: UUID = Depends(get_user_id_from_auth),
     service: UploadService = Depends(get_upload_service)
 ) -> List[FileDB]:
-    """List all files uploaded by the current user."""
+    """List all files uploaded by the current user. Supports both JWT and API key auth."""
     return await service.get_user_files(current_user_id)
 
 @router.get("/{file_id}/content")
