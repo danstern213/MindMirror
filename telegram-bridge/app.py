@@ -138,7 +138,6 @@ def process_and_respond(chat_id, user_message):
         data = {
             'message': user_message,
             'user_id': USER_ID,
-            'thread_id': str(chat_id),   # persistent thread per Telegram chat
         }
 
         response_content = accumulate_sse_response(chat_url, headers, data)
