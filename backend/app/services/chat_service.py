@@ -654,6 +654,17 @@ class ChatService:
             # Generate context using prioritized results
             context = self._generate_context(prioritized_results, temporal_description)
 
+            # Fetch prior conversation history before saving current message
+            history_messages = []
+            if thread_id:
+                try:
+                    prior = await self.get_thread_messages(thread_id, user_id)
+                    for msg in prior[-20:]:  # cap at last 20 messages (~10 turns)
+                        history_messages.append({"role": msg.role, "content": msg.content})
+                    logger.info(f"[PROCESS_MESSAGE] Loaded {len(history_messages)} history messages from thread {thread_id}")
+                except Exception as e:
+                    logger.warning(f"Could not load thread history for context: {e}")
+
             # If we have a thread, add the user message to it
             if thread_id:
                 try:
@@ -664,10 +675,10 @@ class ChatService:
                             status_code=404,
                             detail="Chat thread not found or access denied. Please refresh the page and try again."
                         )
-                    
+
                     # Add user message to database
                     await self.add_message(thread_id, "user", content)
-                    
+
                 except HTTPException:
                     raise
                 except Exception as e:
@@ -698,6 +709,7 @@ Here are the relevant notes and their context:
 
             messages = [
                 {"role": "system", "content": system_content},
+                *history_messages,
                 {"role": "user", "content": content}
             ]
             
