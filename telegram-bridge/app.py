@@ -42,7 +42,7 @@ def send_telegram_message(chat_id, text):
     requests.post(url, json={"chat_id": chat_id, "text": text})
 
 
-def accumulate_sse_response(url, headers, data, timeout=60):
+def accumulate_sse_response(url, headers, data, timeout=(10, 180)):
     """
     POST to the SSE endpoint and accumulate the full streamed response.
     Returns the complete content string.

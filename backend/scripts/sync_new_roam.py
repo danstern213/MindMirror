@@ -18,6 +18,7 @@ Environment variables:
 import os
 import sys
 import logging
+from datetime import datetime
 from pathlib import Path
 
 # Add the scripts directory to the path so we can import file_sync
@@ -32,6 +33,33 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+SUMMARY_LOG = Path("~/Library/Logs/sync-new-roam-summary.log").expanduser()
+
+
+def get_file_title(file_path: Path) -> str:
+    """Extract first non-empty line as the title, stripping markdown heading markers."""
+    try:
+        for line in file_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = line.strip().lstrip("#").strip()
+            if line:
+                return line[:120]  # cap length
+    except Exception:
+        pass
+    return file_path.stem
+
+
+def write_summary(run_time: datetime, uploaded_files: list[tuple[str, Path]], uploaded: int, skipped: int, failed: int):
+    with SUMMARY_LOG.open("a") as f:
+        f.write(f"\n[{run_time.strftime('%Y-%m-%d %H:%M:%S')}] Sync run\n")
+        if uploaded_files:
+            for name, path in uploaded_files:
+                title = get_file_title(path)
+                f.write(f"  + {name}\n")
+                f.write(f"    \"{title}\"\n")
+        else:
+            f.write("  (no new files uploaded)\n")
+        f.write(f"  Summary: {uploaded} uploaded, {skipped} skipped, {failed} failed\n")
 
 
 def get_local_md_files(watch_dir: Path) -> list[Path]:
@@ -67,12 +95,15 @@ def main():
     logger.info(f"Scanning: {watch_dir}")
     logger.info(f"API URL: {api_url}")
 
+    run_time = datetime.now()
+
     # Find local .md files
     local_files = get_local_md_files(watch_dir)
     logger.info(f"Found {len(local_files)} .md files locally")
 
     if not local_files:
         logger.info("Nothing to do.")
+        write_summary(run_time, [], 0, 0, 0)  # type: ignore[arg-type]
         return
 
     # Fetch already-uploaded filenames from the API
@@ -85,6 +116,7 @@ def main():
         uploaded = 0
         skipped = 0
         failed = 0
+        uploaded_files = []
 
         for file_path in local_files:
             if file_path.name in remote_filenames:
@@ -99,11 +131,13 @@ def main():
                     skipped += 1
                 else:
                     uploaded += 1
+                    uploaded_files.append((file_path.name, file_path))
             except Exception as e:
                 logger.error(f"Failed to upload {file_path.name}: {e}")
                 failed += 1
 
     logger.info(f"Done. Uploaded: {uploaded}, Skipped: {skipped}, Failed: {failed}")
+    write_summary(run_time, uploaded_files, uploaded, skipped, failed)
 
 
 if __name__ == "__main__":
