@@ -214,8 +214,8 @@ def index():
     """
 
 
-# Register webhook with Telegram when the app starts
-register_webhook()
+# Register webhook in a background thread so it doesn't block gunicorn startup
+threading.Thread(target=register_webhook, daemon=True).start()
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
