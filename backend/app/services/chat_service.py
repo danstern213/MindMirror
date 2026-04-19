@@ -359,36 +359,60 @@ class ChatService:
     async def _update_thread_title_if_needed(self, thread_id: UUID, first_message: str) -> None:
         """Update thread title if it's still the default 'New Chat'."""
         try:
-            # Check if current title is the default
             thread_response = self.supabase.table('chat_threads')\
                 .select('title')\
                 .eq('id', str(thread_id))\
                 .single()\
                 .execute()
-            
+
             if hasattr(thread_response, 'error') or not thread_response.data:
                 return
-            
-            current_title = thread_response.data['title']
-            if current_title == "New Chat":
-                # Generate new title from first message
-                new_title = first_message.strip()
-                if len(new_title) > 50:  # Truncate if too long
-                    new_title = new_title[:47] + "..."
-                
-                # Update the title
-                response = self.supabase.table('chat_threads')\
-                    .update({'title': new_title})\
-                    .eq('id', str(thread_id))\
-                    .execute()
-                
-                if hasattr(response, 'error') and response.error:
-                    logger.error(f"Database error updating thread title: {response.error}")
-                else:
-                    logger.info(f"Updated thread {thread_id} title to: {new_title}")
-                
+
+            if thread_response.data['title'] != "New Chat":
+                return
+
+            new_title = await self._generate_thread_title(first_message)
+
+            response = self.supabase.table('chat_threads')\
+                .update({'title': new_title})\
+                .eq('id', str(thread_id))\
+                .execute()
+
+            if hasattr(response, 'error') and response.error:
+                logger.error(f"Database error updating thread title: {response.error}")
+            else:
+                logger.info(f"Updated thread {thread_id} title to: {new_title}")
+
         except Exception as e:
             logger.error(f"Failed to update thread title: {e}")
+
+    async def _generate_thread_title(self, first_message: str) -> str:
+        """Use LLM to generate a short descriptive thread title from the first message."""
+        try:
+            response = await self.openai_client.chat.completions.create(
+                model=settings.OPENAI_MODEL,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Generate a concise, descriptive title for a chat thread based on the user's first message. "
+                            "The title should capture the topic or intent clearly. "
+                            "Maximum 40 characters. No quotes. No punctuation at the end."
+                        )
+                    },
+                    {"role": "user", "content": first_message[:500]}
+                ],
+                max_completion_tokens=20
+            )
+            title = response.choices[0].message.content.strip().strip('"\'')
+            if len(title) > 40:
+                title = title[:37] + "..."
+            return title or first_message[:37] + "..."
+        except Exception as e:
+            logger.error(f"Failed to generate thread title via LLM: {e}")
+            # Fall back to truncating the message
+            msg = first_message.strip()
+            return msg[:37] + "..." if len(msg) > 40 else msg
 
     async def analyze_conversation_continuity(
         self,

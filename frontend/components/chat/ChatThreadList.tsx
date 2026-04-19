@@ -10,14 +10,10 @@ interface ChatThreadListProps {
 }
 
 function getThreadPreview(thread: ChatThread): { title: string; preview: string } {
-  // Get the first user message as title
-  const firstUserMessage = thread.messages.find(m => m.role === 'user');
   const lastMessage = thread.messages[thread.messages.length - 1];
-  
-  const title = firstUserMessage 
-    ? firstUserMessage.content.slice(0, 50) + (firstUserMessage.content.length > 50 ? '...' : '')
-    : thread.title;
-    
+
+  const title = thread.title;
+
   const preview = lastMessage
     ? `${lastMessage.role === 'user' ? 'You: ' : 'AI: '}${lastMessage.content.slice(0, 60)}${lastMessage.content.length > 60 ? '...' : ''}`
     : 'No messages yet';
