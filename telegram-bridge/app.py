@@ -3,11 +3,13 @@ Telegram Bridge for AI Note Copilot
 Receives Telegram messages and forwards to chat API with SSE handling.
 No Twilio needed — uses Telegram Bot API directly (free).
 """
+import atexit
 import json
 import os
 import threading
 import requests
 from flask import Flask, request, Response
+from apscheduler.schedulers.background import BackgroundScheduler
 
 app = Flask(__name__)
 
@@ -19,6 +21,11 @@ USER_ID = os.environ.get('USER_ID')        # Your Supabase user UUID
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 WEBHOOK_SECRET = os.environ.get('TELEGRAM_WEBHOOK_SECRET')
 APP_URL = os.environ.get('APP_URL')        # Your Railway public URL, e.g. https://xxx.up.railway.app
+
+# Daily briefing configuration
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')   # Your personal Telegram chat ID
+BRIEFING_TIME = os.environ.get('BRIEFING_TIME', '08:00') # HH:MM in BRIEFING_TIMEZONE
+BRIEFING_TIMEZONE = os.environ.get('BRIEFING_TIMEZONE', 'America/New_York')
 
 
 def register_webhook():
@@ -213,6 +220,47 @@ def index():
     </html>
     """
 
+
+def send_daily_briefing():
+    """Proactively generate and send the daily AI briefing to the configured Telegram chat."""
+    if not TELEGRAM_CHAT_ID:
+        print("WARNING: TELEGRAM_CHAT_ID not set — skipping daily briefing")
+        return
+    if not API_KEY or not USER_ID:
+        print("ERROR: API_KEY or USER_ID not configured — skipping daily briefing")
+        return
+    try:
+        briefing_url = f"{API_URL}/briefing/generate"
+        headers = {
+            'X-API-Key': API_KEY,
+            'Content-Type': 'application/json'
+        }
+        response_content = accumulate_sse_response(
+            briefing_url,
+            headers,
+            {'user_id': USER_ID}
+        )
+        chunks = split_message(response_content)
+        for i, chunk in enumerate(chunks):
+            if len(chunks) > 1:
+                chunk = f"({i+1}/{len(chunks)}) {chunk}"
+            send_telegram_message(TELEGRAM_CHAT_ID, chunk)
+        print(f"Daily briefing sent to chat {TELEGRAM_CHAT_ID}: {response_content[:80]}...")
+    except Exception as e:
+        print(f"Error sending daily briefing: {e}")
+
+
+# --- Daily briefing scheduler ---
+try:
+    _hour, _minute = (int(x) for x in BRIEFING_TIME.split(':'))
+except (ValueError, AttributeError):
+    _hour, _minute = 8, 0
+    print(f"WARNING: Invalid BRIEFING_TIME '{BRIEFING_TIME}', defaulting to 08:00")
+
+_scheduler = BackgroundScheduler(timezone=BRIEFING_TIMEZONE)
+_scheduler.add_job(send_daily_briefing, 'cron', hour=_hour, minute=_minute)
+_scheduler.start()
+atexit.register(lambda: _scheduler.shutdown(wait=False))
 
 # Register webhook in a background thread so it doesn't block gunicorn startup
 threading.Thread(target=register_webhook, daemon=True).start()

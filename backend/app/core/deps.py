@@ -11,6 +11,7 @@ from ..services.storage_service import StorageService
 from ..services.search_service import SearchService
 from ..services.upload_service import UploadService
 from ..services.chat_service import ChatService
+from ..services.briefing_service import BriefingService
 from ..services.embedding_service import EmbeddingService
 from ..services.api_key_service import APIKeyService
 
@@ -167,4 +168,11 @@ def get_chat_service(
     storage_service: StorageService = Depends(get_storage_service)
 ) -> ChatService:
     """Get chat service instance."""
-    return ChatService(client, search_service, storage_service) 
+    return ChatService(client, search_service, storage_service)
+
+def get_briefing_service(
+    search_service: SearchService = Depends(get_search_service),
+    settings_service: SettingsService = Depends(get_settings_service)
+) -> BriefingService:
+    """Get briefing service instance."""
+    return BriefingService(search_service, settings_service) 
