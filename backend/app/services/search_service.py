@@ -4,12 +4,11 @@ from uuid import UUID
 from supabase import Client, create_client
 import json
 import logging
-from .embedding_helper import generate_embedding
+from .embedding_helper import generate_embedding_async
 from .search_helper import (
     cosine_similarity,
     extract_keywords,
-    calculate_keyword_score,
-    get_linked_contexts
+    calculate_keyword_score
 )
 from ..models.search import SearchResult, SearchQuery
 from ..core.config import get_settings
@@ -185,11 +184,10 @@ class SearchService:
             logger.info(f"Pre-fetched {len(date_matched_results)} date-matched documents")
 
         # Generate query embedding
-        query_embedding = generate_embedding(search_query.query, api_key)
+        query_embedding = await generate_embedding_async(search_query.query, api_key)
 
         # Initialize constants
         similarity_threshold = 0.75  # Match src implementation
-        highly_relevant_threshold = 0.8  # Match src implementation
         page_size = 500  # Reduced batch size for memory efficiency
 
         try:
@@ -280,11 +278,6 @@ class SearchService:
                 keyword_score = calculate_keyword_score(combined_text, keywords)
                 matched_keywords = [k for k in keywords if k.lower() in combined_text.lower()]
 
-                # Get linked contexts only for highly relevant results
-                linked_contexts = []
-                if data['score'] >= highly_relevant_threshold:
-                    linked_contexts = await get_linked_contexts(combined_text, query_embedding, api_key)
-
                 # Calculate date boost if temporal query
                 date_boost = self._calculate_date_boost(
                     data.get('document_date'),
@@ -303,7 +296,6 @@ class SearchService:
                     title=data['title'],
                     keyword_score=keyword_score,
                     matched_keywords=matched_keywords,
-                    linked_contexts=linked_contexts,
                     document_date=data.get('document_date')
                 ))
 

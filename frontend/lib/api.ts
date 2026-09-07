@@ -270,11 +270,21 @@ class ApiClient {
     const decoder = new TextDecoder();
     let buffer = '';
     let chunkCount = 0;
+    // The server sends "[DONE]" as the last event. If the socket closes without it,
+    // the request died mid-stream (the 200 OK headers were already sent, so there is
+    // no HTTP error to read) and we must not treat that as a successful response.
+    let sawDoneMarker = false;
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) {
         console.log(`[FRONTEND] Stream done - total chunks read: ${chunkCount}, final buffer length: ${buffer.length}`);
+        if (!sawDoneMarker) {
+          console.error('[FRONTEND] Stream ended without [DONE] marker - server aborted mid-response');
+          throw new Error(
+            'The server stopped responding partway through. Please try again — if it keeps happening, check the backend logs.'
+          );
+        }
         break;
       }
 
@@ -290,14 +300,25 @@ class ApiClient {
           const data = line.slice(6);
           if (data === '[DONE]') {
             console.log('[FRONTEND] Received [DONE] marker');
+            sawDoneMarker = true;
             return;
           }
           try {
             const parsed = JSON.parse(data) as ChatResponse;
             console.log(`[FRONTEND] Parsed SSE data - content_length: ${parsed.content?.length || 0}, done: ${parsed.done}`);
+            // The backend reports mid-stream failures in-band, because it can no
+            // longer change the HTTP status once streaming has begun.
+            if (parsed.error) {
+              console.error('[FRONTEND] Server reported a streaming error:', parsed.error);
+              throw new Error(parsed.error);
+            }
             yield parsed;
           } catch (e) {
-            console.error('[FRONTEND] Error parsing SSE data:', e, { line, data });
+            if (e instanceof SyntaxError) {
+              console.error('[FRONTEND] Error parsing SSE data:', e, { line, data });
+            } else {
+              throw e;
+            }
           }
         }
       }

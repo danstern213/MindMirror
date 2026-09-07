@@ -1,10 +1,10 @@
 from typing import List, Optional
+import logging
 import math
-from .embedding_helper import generate_embedding
-from ..models.search import LinkedContext, SearchResult
 from ..core.config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
     """Calculate cosine similarity between two vectors."""
@@ -57,50 +57,10 @@ def calculate_keyword_score(content: str, keywords: List[str]) -> float:
             score += len(matches)
 
     # Normalize score by content length (per 100 characters)
+    if not content:
+        return 0.0
     return score / (len(content) / 100)
 
 def extract_relevant_section(content: str, max_length: int = 2000) -> str:
     """Extract a more comprehensive section of content."""
     return content[:max_length] if len(content) > max_length else content
-
-async def get_linked_contexts(
-    content: str,
-    query_embedding: List[float],
-    api_key: Optional[str] = None,
-    similarity_threshold: Optional[float] = None
-) -> List[LinkedContext]:
-    """Extract and process linked contexts from content."""
-    import re
-    link_regex = r'\[\[(.*?)\]\]'
-    matches = list(re.finditer(link_regex, content))
-    linked_contexts: List[LinkedContext] = []
-    
-    if not matches:
-        return []
-    
-    similarity_threshold = similarity_threshold or settings.SIMILARITY_THRESHOLD
-    
-    # Extract all paths
-    paths = [match.group(1).split('|')[0] for match in matches]
-    
-    try:
-        # Generate one embedding for all paths combined
-        combined_text = " | ".join(paths)
-        combined_embedding = generate_embedding(combined_text, api_key)
-        
-        # Process each path with the combined embedding
-        for path in paths:
-            relevance = cosine_similarity(query_embedding, combined_embedding)
-            
-            if relevance >= similarity_threshold:
-                linked_contexts.append(
-                    LinkedContext(
-                        note_path=path,
-                        relevance=relevance,
-                        context=extract_relevant_section(path)
-                    )
-                )
-    except Exception as e:
-        logger.error(f"Error processing linked notes: {e}")
-    
-    return sorted(linked_contexts, key=lambda x: x.relevance, reverse=True) 

@@ -60,4 +60,6 @@ export interface ChatResponse {
   sources?: SearchResult[];
   thread_id: string;
   done: boolean;
+  /** Set when the backend failed after the stream had already started. */
+  error?: string | null;
 } 

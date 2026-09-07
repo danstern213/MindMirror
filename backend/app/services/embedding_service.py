@@ -1,6 +1,6 @@
 from typing import List, Optional
 from supabase import Client, create_client
-from .embedding_helper import generate_embedding
+from .embedding_helper import generate_embedding_async
 from ..core.config import get_settings
 from ..models.file import EmbeddingCreate, EmbeddingDB
 import logging
@@ -152,7 +152,7 @@ class EmbeddingService:
                         logger.debug(f"Chunk preview: {chunk[:100]}...")
                         
                         # Generate embedding with timeout and retry
-                        embedding = generate_embedding(chunk, api_key)
+                        embedding = await generate_embedding_async(chunk, api_key)
                         if not embedding or not isinstance(embedding, list):
                             error_msg = f"Invalid embedding generated for chunk {chunk_index}"
                             logger.error(error_msg)

@@ -27,6 +27,10 @@ class ChatResponse(BaseModel):
     sources: Optional[List[Dict[str, Any]]] = None
     thread_id: UUID
     done: bool = False
+    error: Optional[str] = Field(
+        default=None,
+        description="Set when the stream failed after headers were already sent"
+    )
 
 class StreamingChatResponse(ChatResponse):
     """Response model for streaming chat responses. Inherits from ChatResponse."""

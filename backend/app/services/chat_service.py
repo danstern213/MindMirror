@@ -1,6 +1,7 @@
 from typing import List, Optional, Dict, Any, AsyncGenerator
 from datetime import datetime, timezone, date
 from uuid import UUID, uuid4
+import asyncio
 import logging
 import json
 import re
@@ -18,6 +19,35 @@ from ..core.utils import count_tokens, truncate_messages_to_fit_limit
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+# asyncio only holds a weak reference to a running task, so a task nobody keeps
+# a handle to can be garbage collected mid-flight. Park them here until they finish.
+_background_tasks: set = set()
+
+
+def _spawn_background(coro, description: str) -> None:
+    """Run a coroutine outside the request's critical path, logging any failure."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+    def _log_failure(t: "asyncio.Task") -> None:
+        if not t.cancelled() and t.exception() is not None:
+            logger.error(f"Background task failed ({description}): {t.exception()}")
+
+    task.add_done_callback(_log_failure)
+
+
+# Average English text runs ~4 characters per token. Exact tiktoken counts cost a
+# full encode pass over every candidate document, which is the single most
+# expensive thing in result prioritisation; the real count is still verified
+# against the assembled prompt afterwards, so an estimate is safe here.
+_CHARS_PER_TOKEN = 4
+
+
+def _estimate_tokens(text: str) -> int:
+    return len(text) // _CHARS_PER_TOKEN
+
 
 def _format_datetime_for_db(dt: datetime) -> str:
     """Convert datetime to consistent format for database storage."""
@@ -279,13 +309,20 @@ class ChatService:
                     detail="Failed to save message to database"
                 )
             
-            # Update thread's last_updated timestamp
-            await self._update_thread_timestamp(thread_id)
-            
-            # If this is the first user message, update the thread title
+            # Bookkeeping the caller does not need to wait on. Titling in
+            # particular costs a full LLM round-trip, and add_message() is awaited
+            # before the response stream opens, so awaiting these here is dead air
+            # in front of the user's first token.
+            _spawn_background(
+                self._update_thread_timestamp(thread_id),
+                f"update timestamp for thread {thread_id}"
+            )
             if role == 'user':
-                await self._update_thread_title_if_needed(thread_id, content)
-            
+                _spawn_background(
+                    self._update_thread_title_if_needed(thread_id, content),
+                    f"generate title for thread {thread_id}"
+                )
+
             return message
             
         except HTTPException:
@@ -581,9 +618,6 @@ class ChatService:
         if not search_results:
             return []
             
-        # Import here to avoid circular imports
-        from ..core.utils import count_tokens
-        
         # First, separate explicit references and regular results
         explicit_refs = []
         scored_results = []
@@ -602,7 +636,7 @@ class ChatService:
         
         # Calculate current token usage
         context_text = self._generate_context(prioritized_results)
-        current_tokens = count_tokens([{"role": "system", "content": context_text}], settings.OPENAI_MODEL)
+        current_tokens = _estimate_tokens(context_text)
         
         # If we're already over budget with just explicit refs, we need to truncate their content later
         if current_tokens > token_budget:
@@ -616,7 +650,7 @@ class ChatService:
         for result in scored_results:
             # Roughly estimate tokens for this result
             result_text = self._generate_context([result])
-            result_tokens = count_tokens([{"role": "system", "content": result_text}], settings.OPENAI_MODEL)
+            result_tokens = _estimate_tokens(result_text)
             
             if result_tokens < remaining_budget:
                 prioritized_results.append(result)
