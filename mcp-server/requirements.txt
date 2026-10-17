@@ -1,0 +1,7 @@
+# Deliberately NOT sharing the backend's requirements.txt: mcp 2.x needs
+# pydantic>=2.12 and httpx2, which conflict with the backend's pydantic==2.6.1
+# and supabase-pinned httpx<0.25. Keeping this service separate is what lets
+# both run current dependencies.
+mcp==2.3.0
+httpx2==2.13.1
+uvicorn==0.54.0
