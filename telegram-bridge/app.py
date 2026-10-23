@@ -27,6 +27,15 @@ TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')   # Your personal Telegram
 BRIEFING_TIME = os.environ.get('BRIEFING_TIME', '08:00') # HH:MM in BRIEFING_TIMEZONE
 BRIEFING_TIMEZONE = os.environ.get('BRIEFING_TIMEZONE', 'America/New_York')
 
+# Only these chats get answers. The bot's username is public, so without this
+# anyone who found it could query the notes. Defaults to the briefing chat;
+# set TELEGRAM_ALLOWED_CHAT_IDS (comma-separated) to allow more than one.
+ALLOWED_CHAT_IDS = {
+    c.strip()
+    for c in os.environ.get('TELEGRAM_ALLOWED_CHAT_IDS', TELEGRAM_CHAT_ID or '').split(',')
+    if c.strip()
+}
+
 
 def register_webhook():
     """Register this service's webhook URL with Telegram on startup."""
@@ -182,10 +191,16 @@ def telegram_webhook():
     text = message.get('text', '').strip()
     chat_id = message.get('chat', {}).get('id')
 
-    print(f"Received from chat {chat_id}: {text}")
-
     if not text or not chat_id:
         return Response(status=200)
+
+    # Log the id but not the text, so the owner can still find their chat id
+    # here without strangers' messages landing in the logs.
+    if str(chat_id) not in ALLOWED_CHAT_IDS:
+        print(f"Ignored message from unauthorized chat {chat_id}")
+        return Response(status=200)
+
+    print(f"Received from chat {chat_id}: {text}")
 
     if not API_KEY or not USER_ID:
         print("ERROR: API_KEY or USER_ID not configured")
@@ -203,7 +218,8 @@ def health():
     return {
         'status': 'healthy',
         'api_url': API_URL,
-        'configured': bool(API_KEY and USER_ID and BOT_TOKEN),
+        'configured': bool(API_KEY and USER_ID and BOT_TOKEN and ALLOWED_CHAT_IDS),
+        'allowed_chats': len(ALLOWED_CHAT_IDS),
     }
 
 
