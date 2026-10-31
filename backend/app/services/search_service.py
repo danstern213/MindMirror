@@ -192,12 +192,16 @@ class SearchService:
         try:
             chunks = await self._vector_search_chunks(search_query, api_key)
         except Exception as e:
-            # Most likely the migration has not been applied yet.
-            logger.warning(f"pgvector search unavailable, falling back to legacy scan: {e}")
-            chunks = []
-        if not chunks:
-            logger.info("No pgvector results (backfill not run yet?); using legacy scan")
-            chunks = await asyncio.to_thread(self._legacy_scan_chunks, search_query, api_key)
+            # Fall back only when the function does not exist. The legacy scan
+            # takes ~90s on this corpus, so using it for a timeout or a blip
+            # turns a slow answer into a useless one; answer from recent notes
+            # and explicit links instead.
+            if 'match_embeddings' in str(e) and ('does not exist' in str(e) or 'PGRST202' in str(e)):
+                logger.warning(f"match_embeddings missing, falling back to legacy scan: {e}")
+                chunks = await asyncio.to_thread(self._legacy_scan_chunks, search_query, api_key)
+            else:
+                logger.error(f"pgvector search failed: {e}")
+                chunks = []
 
         keywords = extract_keywords(search_query.query)
         results = _group_chunks_by_document(chunks, keywords)
@@ -297,6 +301,67 @@ class SearchService:
             offset += page_size
         return chunks
 
+    async def get_recent_notes(
+        self,
+        user_id: UUID,
+        days: int,
+        token_budget: int,
+        today: Optional[date] = None
+    ) -> List[SearchResult]:
+        """
+        The user's notes from the last `days`, whole, oldest first, newest kept
+        when they do not all fit in `token_budget`.
+
+        This is what is on the user's mind right now, and it goes into every
+        chat prompt as-is rather than through search: at ~30K tokens a month it
+        fits, and search only ever returns fragments of it. A note's date is its
+        document_date (from the filename); undated notes count by upload date.
+        """
+        since = ((today or date.today()) - timedelta(days=days)).isoformat()
+        columns = 'id, title, document_date, created_at, embeddings(text, chunk_index)'
+
+        def fetch():
+            dated = self.supabase.table('files').select(columns)\
+                .eq('user_id', str(user_id))\
+                .gte('document_date', since)\
+                .execute().data or []
+            undated = self.supabase.table('files').select(columns)\
+                .eq('user_id', str(user_id))\
+                .is_('document_date', 'null')\
+                .gte('created_at', since)\
+                .execute().data or []
+            return dated + undated
+
+        try:
+            files = await asyncio.to_thread(fetch)
+        except Exception as e:
+            logger.error(f"Error fetching recent notes: {e}")
+            return []
+
+        notes = []
+        for file in files:
+            chunks = sorted(file.get('embeddings') or [], key=lambda e: e.get('chunk_index') or 0)
+            content = stitch_chunks([c['text'] for c in chunks if c.get('text')])
+            if not content.strip():
+                continue
+            note_date = self._parse_document_date(file.get('document_date')) \
+                or self._parse_document_date((file.get('created_at') or '')[:10])
+            notes.append(SearchResult(id=file['id'], score=1.0, content=content,
+                                      title=file['title'], document_date=note_date))
+
+        # Newest first while filling the budget, then back to reading order.
+        notes.sort(key=lambda n: n.document_date or date.min, reverse=True)
+        kept, used = [], 0
+        for note in notes:
+            cost = len(note.content) // 4
+            if used + cost > token_budget:
+                continue
+            kept.append(note)
+            used += cost
+        kept.sort(key=lambda n: n.document_date or date.min)
+        logger.info(f"Recent notes: kept {len(kept)} of {len(notes)} from the last {days} days (~{used} tokens)")
+        return kept
+
     async def search_by_title(self, title: str, user_id: str) -> Optional[SearchResult]:
         """
         Load a note the user linked as [[title]], in full and in reading order.
@@ -317,7 +382,7 @@ class SearchService:
 
             file = response.data[0]
             chunks = sorted(file.get('embeddings') or [], key=lambda e: e.get('chunk_index') or 0)
-            content = '\n'.join(c['text'] for c in chunks if c.get('text'))
+            content = stitch_chunks([c['text'] for c in chunks if c.get('text')])
             if len(content) > EXPLICIT_NOTE_MAX_CHARS:
                 content = content[:EXPLICIT_NOTE_MAX_CHARS] + "\n[...note truncated...]"
 
@@ -333,6 +398,27 @@ class SearchService:
         except Exception as e:
             logger.error(f"Error searching by title: {e}")
             return None
+
+
+def stitch_chunks(texts: List[str], max_overlap: int = 600) -> str:
+    """
+    Rejoin a note's chunks into its original text.
+
+    Chunks overlap by CHUNK_OVERLAP characters, so a plain join repeats every
+    seam. Where the end of one chunk reappears at the start of the next, drop
+    the repeat; otherwise fall back to a newline join.
+    """
+    if not texts:
+        return ""
+    out = texts[0]
+    for nxt in texts[1:]:
+        overlap = 0
+        for k in range(min(max_overlap, len(out), len(nxt)), 20, -1):
+            if out.endswith(nxt[:k]):
+                overlap = k
+                break
+        out = out + nxt[overlap:] if overlap else out + "\n" + nxt
+    return out
 
 
 def _group_chunks_by_document(chunks: List[Dict[str, Any]], keywords: List[str]) -> List[SearchResult]:

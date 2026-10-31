@@ -5,7 +5,12 @@
 # `expect` lists acceptable titles (any one counts). Add a question whenever
 # chat misses a note you know exists; that's the most valuable kind.
 #
-#   python3 scripts/eval_retrieval.py --mode both
+#   EVAL_USER_ID=<uuid> python3 scripts/eval_retrieval.py
+#
+# Baselines (2026-10-31, 20 questions):
+#   ada-002, Python scan, first-seen chunk score:      hit@5 16  hit@10 17  MRR 0.73
+#   3-large + title/date prefix, pgvector, best chunk: hit@5 17  hit@10 17  MRR 0.79
+# Still missed by both: "ideal life", "anxiety and dread", "product traction".
 
 - question: what kind of work do I not want to do in my career?
   expect: ["What do I want my ideal life to look like.md"]

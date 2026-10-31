@@ -63,7 +63,7 @@ def test_dimensions_only_sent_to_text_embedding_3_models():
 async def test_search_falls_back_to_legacy_scan_when_rpc_is_missing(monkeypatch):
     service = SearchService(MagicMock())
     doc = str(uuid4())
-    service._vector_search_chunks = AsyncMock(side_effect=Exception("function match_embeddings does not exist"))
+    service._vector_search_chunks = AsyncMock(side_effect=Exception("function match_embeddings(vector, text) does not exist"))
     service._legacy_scan_chunks = MagicMock(return_value=[chunk(doc, 0, 0.8, title="Legacy.md")])
 
     results = await service.search(SearchQuery(query="q", user_id=uuid4()))
@@ -80,6 +80,18 @@ async def test_search_uses_vector_results_without_touching_legacy():
     results = await service.search(SearchQuery(query="q", user_id=uuid4()))
 
     assert [r.title for r in results] == ["Vec.md"]
+    service._legacy_scan_chunks.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_search_timeout_does_not_fall_back_to_slow_legacy_scan():
+    service = SearchService(MagicMock())
+    service._vector_search_chunks = AsyncMock(side_effect=Exception("canceling statement due to statement timeout"))
+    service._legacy_scan_chunks = MagicMock()
+
+    results = await service.search(SearchQuery(query="q", user_id=uuid4()))
+
+    assert results == []
     service._legacy_scan_chunks.assert_not_called()
 
 
@@ -123,3 +135,37 @@ async def test_query_rewrite_failure_falls_back_to_raw_message():
     query = await service._standalone_search_query("what else?", [{"role": "user", "content": "x"}])
 
     assert query == "what else?"
+
+
+def test_stitch_chunks_removes_the_overlap_between_chunks():
+    from app.services.search_service import stitch_chunks
+    text = "".join(f"sentence number {i}. " for i in range(200))
+    chunks = [text[0:1500], text[1200:2700], text[2400:]]
+
+    assert stitch_chunks(chunks) == text
+
+
+def test_stitch_chunks_falls_back_to_newline_when_no_overlap():
+    from app.services.search_service import stitch_chunks
+    assert stitch_chunks(["first part of the note", "an unrelated second part"]) == \
+        "first part of the note\nan unrelated second part"
+
+
+@pytest.mark.asyncio
+async def test_recent_notes_keep_newest_within_budget_in_reading_order():
+    supabase = MagicMock()
+    files_query = supabase.table.return_value.select.return_value.eq.return_value
+
+    def note(day, chars, title):
+        return {"id": str(uuid4()), "title": title, "document_date": f"2026-10-{day:02d}",
+                "created_at": "2026-10-31T00:00:00", "embeddings": [{"text": "x" * chars, "chunk_index": 0}]}
+
+    files_query.gte.return_value.execute.return_value = SimpleNamespace(data=[
+        note(5, 400, "old.md"), note(20, 400, "mid.md"), note(28, 400, "new.md"),
+    ])
+    files_query.is_.return_value.gte.return_value.execute.return_value = SimpleNamespace(data=[])
+
+    # Budget of 250 tokens (~1000 chars) fits two 400-char notes: the two newest.
+    notes = await SearchService(supabase).get_recent_notes(uuid4(), days=30, token_budget=250, today=date(2026, 10, 31))
+
+    assert [n.title for n in notes] == ["mid.md", "new.md"]

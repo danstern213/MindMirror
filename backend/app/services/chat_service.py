@@ -523,6 +523,14 @@ class ChatService:
 
         return context
 
+    def _format_recent_notes(self, notes: List[SearchResult]) -> str:
+        if not notes:
+            return "(no notes in this period)"
+        return "\n\n==========\n\n".join(
+            f"[[{n.title}]]" + (f" ({n.document_date.isoformat()})" if n.document_date else "") + f"\n{n.content}"
+            for n in notes
+        )
+
     def _serialize_sources_for_json(self, sources: List[dict]) -> List[dict]:
         """Convert sources to JSON-serializable format by converting UUIDs and dates to strings."""
         if not sources:
@@ -598,9 +606,8 @@ class ChatService:
             if result_tokens < remaining_budget:
                 prioritized_results.append(result)
                 remaining_budget -= result_tokens
-            else:
-                # Stop adding results once we hit the budget
-                break
+            # A long note that doesn't fit shouldn't stop shorter, lower-ranked
+            # ones that do, so keep going rather than break.
                 
         logger.info(f"Prioritized {len(prioritized_results)} out of {len(search_results)} search results to fit token budget")
         return prioritized_results
@@ -639,20 +646,27 @@ class ChatService:
                     date_end=parsed_query.date_range.end if parsed_query.date_range else None
                 ))
 
-            user_settings, semantic_results, explicit_results = await asyncio.gather(
+            user_settings, semantic_results, explicit_results, recent_notes = await asyncio.gather(
                 self.settings_service.get_user_settings(user_id),
                 run_search(),
                 self.get_explicitly_referenced_notes(content, user_id),
+                self.search_service.get_recent_notes(
+                    user_id, settings.RECENT_NOTES_DAYS, settings.RECENT_NOTES_TOKEN_BUDGET
+                ),
             )
 
+            # Recent notes are already in the prompt whole; don't repeat them as
+            # search fragments. An explicit [[link]] still wins, so it is never dropped.
             explicit_dicts = [result.model_dump() for result in explicit_results]
             explicit_ids = {d['id'] for d in explicit_dicts}
-            semantic_dicts = [r.model_dump() for r in semantic_results if r.id not in explicit_ids]
+            recent_notes = [n for n in recent_notes if n.id not in explicit_ids]
+            in_prompt_ids = explicit_ids | {n.id for n in recent_notes}
+            semantic_dicts = [r.model_dump() for r in semantic_results if r.id not in in_prompt_ids]
             all_results = explicit_dicts + semantic_dicts
 
-            # Prioritize results to fit within token budget before generating context
-            # Use a lower budget to leave room for system message and conversation
-            prioritized_results = self._prioritize_search_results(all_results, token_budget=20000)
+            prioritized_results = self._prioritize_search_results(
+                all_results, token_budget=settings.RETRIEVED_NOTES_TOKEN_BUDGET
+            )
 
             # Generate context using prioritized results
             context = self._generate_context(prioritized_results, temporal_description)
@@ -660,16 +674,24 @@ class ChatService:
             if thread_id:
                 await self.add_message(thread_id, "user", content)
 
-            # Prepare messages for AI with enhanced context
+            # Stable parts first (instructions, who the user is, this month's
+            # notes) so consecutive messages share a long prefix and hit
+            # OpenAI's automatic prompt cache; per-message search results last.
             system_content = f"""{settings.SYSTEM_PROMPT}
-
-MEMORY CONTEXT:
-{user_settings.get('memory') or '(none)'}
 
 ABOUT THE USER:
 {user_settings.get('personal_info') or '(not provided)'}
 
-Here are the relevant notes and their context:
+MEMORY:
+{user_settings.get('memory') or '(none)'}
+
+TODAY: {date.today().strftime('%A, %B %d, %Y')}
+
+RECENT NOTES (the last {settings.RECENT_NOTES_DAYS} days, in full, oldest first; this is what is on their mind now):
+
+{self._format_recent_notes(recent_notes)}
+
+OLDER NOTES RELEVANT TO THIS MESSAGE (found by search; fragments, not whole notes):
 
 {context}"""
 
@@ -678,139 +700,18 @@ Here are the relevant notes and their context:
                 *history_messages,
                 {"role": "user", "content": content}
             ]
-            
-            # Check token count and truncate if necessary
+
+            # Each part of the prompt is budgeted above, so this only trips on a
+            # very long thread; it drops the oldest turns and keeps everything else.
+            messages = truncate_messages_to_fit_limit(
+                messages,
+                model=settings.OPENAI_MODEL,
+                max_tokens=settings.MAX_PROMPT_TOKENS,
+                preserve_system_message=True,
+                preserve_last_user_message=True
+            )
             token_count = count_tokens(messages, settings.OPENAI_MODEL)
-            logger.info(f"Initial message token count: {token_count}")
-            
-            # If token count exceeds limit, truncate content
-            max_tokens = 28500  # More conservative limit with safety margin
-            if token_count > max_tokens:
-                logger.warning(f"Message token count ({token_count}) exceeds limit. Truncating context.")
-                
-                # First, try to truncate the system message context selectively
-                # We want to keep most of the context but reduce it in a smart way
-                system_lines = system_content.split("\n")
-                context_start = next((i for i, line in enumerate(system_lines) if line == "Here are the relevant notes and their context:"), -1)
-                
-                if context_start != -1 and context_start < len(system_lines) - 1:
-                    # We found the context section, let's truncate it intelligently
-                    
-                    # Calculate how many tokens we need to remove
-                    tokens_to_remove = token_count - max_tokens + 500  # With a small buffer
-                    logger.info(f"Need to remove approximately {tokens_to_remove} tokens")
-                    
-                    # Get just the context part
-                    context_lines = system_lines[context_start + 1:]
-                    context_text = "\n".join(context_lines)
-                    
-                    # Estimate tokens per line for context (rough approximation)
-                    context_tokens = count_tokens([{"role": "system", "content": context_text}], settings.OPENAI_MODEL)
-                    logger.info(f"Context section has approximately {context_tokens} tokens")
-                    
-                    if context_tokens > tokens_to_remove:
-                        # We can just reduce the context rather than removing it all
-                        # Keep a proportional amount of each context section
-                        keep_ratio = 1 - (tokens_to_remove / context_tokens)
-                        keep_ratio = max(0.5, keep_ratio)  # Keep at least 50%
-                        logger.info(f"Keeping approximately {keep_ratio*100:.2f}% of context")
-                        
-                        # Find the = separators which divide different notes
-                        separator_indices = [i for i, line in enumerate(context_lines) if line.startswith("==========")]
-                        
-                        if separator_indices:
-                            # We have multiple sections, keep a balanced portion of each
-                            sections = []
-                            last_idx = 0
-                            
-                            for idx in separator_indices:
-                                sections.append(context_lines[last_idx:idx])
-                                last_idx = idx
-                            
-                            # Add the last section
-                            sections.append(context_lines[last_idx:])
-                            
-                            # Keep the most important parts of each section
-                            truncated_context = []
-                            for section in sections:
-                                # For each section, keep the beginning (title and metadata) and a portion of content
-                                if len(section) <= 5:  # Very short section, keep it all
-                                    truncated_context.extend(section)
-                                else:
-                                    # Keep headers and beginning intact (typically first 3-5 lines)
-                                    header_lines = min(5, len(section) // 3)
-                                    # Keep a proportion of the rest based on our ratio
-                                    content_to_keep = int((len(section) - header_lines) * keep_ratio)
-                                    truncated_context.extend(section[:header_lines])
-                                    if content_to_keep > 0:
-                                        truncated_context.append("[...context truncated to fit token limit...]")
-                                        truncated_context.extend(section[header_lines:header_lines+content_to_keep])
-                            
-                            # Recombine the truncated context
-                            truncated_system_content = "\n".join(
-                                system_lines[:context_start + 1] + truncated_context
-                            )
-                        else:
-                            # Only one big section, keep beginning and end
-                            content_lines = len(context_lines)
-                            keep_lines = int(content_lines * keep_ratio)
-                            
-                            # Always keep beginning (metadata)
-                            beginning_lines = min(5, content_lines // 5)
-                            # Use remaining budget for content, prioritizing beginning and some end
-                            remaining = keep_lines - beginning_lines
-                            
-                            if remaining > 10:
-                                # Keep some from beginning and some from end
-                                from_beginning = int(remaining * 0.7)  # Prioritize beginning
-                                from_end = remaining - from_beginning
-                                
-                                truncated_context = (
-                                    context_lines[:beginning_lines + from_beginning] + 
-                                    ["[...context truncated to fit token limit...]"] + 
-                                    (context_lines[-from_end:] if from_end > 0 else [])
-                                )
-                            else:
-                                # Not enough remaining, just keep from beginning
-                                truncated_context = (
-                                    context_lines[:beginning_lines + remaining] +
-                                    ["[...context truncated to fit token limit...]"]
-                                )
-                            
-                            truncated_system_content = "\n".join(
-                                system_lines[:context_start + 1] + truncated_context
-                            )
-                    else:
-                        # If context isn't much larger than what we need to remove,
-                        # preserve system message structure but thin out context
-                        truncated_system_content = "\n".join(
-                            system_lines[:context_start + 1] + 
-                            ["[Context truncated to fit token limit]"] +
-                            # Keep only document titles and metadata
-                            [line for line in context_lines if line.startswith("[From [[") 
-                             or "score:" in line or "keyword relevance:" in line]
-                        )
-                    
-                    messages[0]["content"] = truncated_system_content
-                    
-                    # Recalculate token count
-                    token_count = count_tokens(messages, settings.OPENAI_MODEL)
-                    logger.info(f"Token count after smart context truncation: {token_count}")
-                
-                # If still over limit, use the more aggressive truncation function as a fallback
-                if token_count > max_tokens:
-                    messages = truncate_messages_to_fit_limit(
-                        messages, 
-                        model=settings.OPENAI_MODEL,
-                        max_tokens=max_tokens,
-                        preserve_system_message=True,
-                        preserve_last_user_message=True
-                    )
-                    
-                    # Recalculate token count
-                    token_count = count_tokens(messages, settings.OPENAI_MODEL)
-                    logger.info(f"Final message token count after truncation: {token_count}")
-            
+
             # Get the chat completion stream
             logger.info(f"[PROCESS_MESSAGE] Calling OpenAI API - model: {settings.OPENAI_MODEL}, message_count: {len(messages)}, token_count: {token_count}")
             try:
