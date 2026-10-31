@@ -165,10 +165,11 @@ def get_embedding_service(client: Client = Depends(get_supabase_client)) -> Embe
 def get_chat_service(
     client: Client = Depends(get_supabase_client),
     search_service: SearchService = Depends(get_search_service),
-    storage_service: StorageService = Depends(get_storage_service)
+    storage_service: StorageService = Depends(get_storage_service),
+    settings_service: SettingsService = Depends(get_settings_service)
 ) -> ChatService:
     """Get chat service instance."""
-    return ChatService(client, search_service, storage_service)
+    return ChatService(client, search_service, storage_service, settings_service)
 
 def get_briefing_service(
     search_service: SearchService = Depends(get_search_service),

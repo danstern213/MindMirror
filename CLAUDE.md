@@ -9,7 +9,7 @@ AI Note Copilot (Big Brain / MindMirror) - A full-stack AI-powered note assistan
 **Tech Stack:**
 - Frontend: Next.js 16 + React 19 + TypeScript + Tailwind CSS + Zustand
 - Backend: FastAPI + Python + Supabase (auth, database, storage)
-- AI: OpenAI GPT-5.2 for chat, text-embedding-ada-002 for embeddings
+- AI: OpenAI GPT-5.2 for chat, text-embedding-3-large for embeddings
 
 ## Development Commands
 
@@ -67,7 +67,7 @@ All routes prefixed with `/api/v1`:
 
 Key settings in `backend/app/core/config.py`:
 - `OPENAI_MODEL`: "gpt-5.2-chat-latest"
-- `EMBEDDING_MODEL`: "text-embedding-ada-002"
+- `EMBEDDING_MODEL`: "text-embedding-3-large" at 1536 dims, searched via the `match_embeddings` pgvector RPC (`backend/migrations/001_pgvector_search.sql`)
 - `SIMILARITY_THRESHOLD`: 0.7
 - `CHUNK_SIZE`: 2000, `CHUNK_OVERLAP`: 300
 - `MAX_UPLOAD_SIZE`: 10MB

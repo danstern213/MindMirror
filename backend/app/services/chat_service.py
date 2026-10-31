@@ -3,7 +3,6 @@ from datetime import datetime, timezone, date
 from uuid import UUID, uuid4
 import asyncio
 import logging
-import json
 import re
 from fastapi import HTTPException
 from openai import AsyncOpenAI
@@ -13,6 +12,7 @@ from ..models.chat import Message, ChatThread, ChatResponse
 from ..models.search import SearchQuery, SearchResult
 from ..services.search_service import SearchService
 from ..services.storage_service import StorageService
+from ..services.settings_service import SettingsService
 from ..services.date_query_parser import DateQueryParser
 from ..core.config import get_settings
 from ..core.utils import count_tokens, truncate_messages_to_fit_limit
@@ -81,24 +81,15 @@ class ChatService:
         self,
         supabase: Client,
         search_service: SearchService,
-        storage_service: StorageService
+        storage_service: StorageService,
+        settings_service: SettingsService
     ):
         self.supabase = supabase
         self.search_service = search_service
         self.storage_service = storage_service
+        self.settings_service = settings_service
         self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         self.date_query_parser = DateQueryParser()
-        # User-specific settings
-        self.user_settings: Dict[UUID, Dict[str, str]] = {}
-    
-    def get_user_settings(self, user_id: UUID) -> Dict[str, str]:
-        """Get user-specific settings, with defaults if not set."""
-        if user_id not in self.user_settings:
-            self.user_settings[user_id] = {
-                "personal_info": "",
-                "memory": ""
-            }
-        return self.user_settings[user_id]
 
     async def get_explicitly_referenced_notes(
         self,
@@ -451,89 +442,41 @@ class ChatService:
             msg = first_message.strip()
             return msg[:37] + "..." if len(msg) > 40 else msg
 
-    async def analyze_conversation_continuity(
-        self,
-        message: str,
-        thread_id: UUID,
-        user_id: UUID
-    ) -> Dict[str, Any]:
-        """Analyze if the message is a follow-up to the previous conversation."""
-        if not thread_id:
-            return {
-                'is_follow_up': False,
-                'search_query': message,
-                'context': message
-            }
+    async def _standalone_search_query(self, message: str, history: List[Dict[str, str]]) -> str:
+        """
+        Turn a follow-up like "what about the second one?" into a query that
+        stands on its own, so the note search knows what "the second one" is.
 
-        # Get thread history
-        thread = await self.get_thread(thread_id, user_id)
-        if not thread or len(thread.messages) < 2:
-            return {
-                'is_follow_up': False,
-                'search_query': message,
-                'context': message
-            }
-
-        # Get last exchange
-        messages = thread.messages
-        last_messages = messages[-3:]  # Get last 3 messages for context
-
+        Only called when there is history. Falls back to the raw message on any
+        failure; a worse search beats a failed response.
+        """
+        recent = history[-6:]
+        transcript = "\n".join(f"{m['role']}: {m['content'][:1000]}" for m in recent)
         try:
-            analysis_messages = [
-                {
-                    "role": "system",
-                    "content": """Analyze the conversation continuity between messages. Determine if the new message is:
-                    1. A follow-up/clarification of the previous topic
-                    2. A new, unrelated topic
-                    
-                    Respond in JSON format:
-                    {
-                        "isFollowUp": boolean,
-                        "explanation": string,
-                        "searchQuery": string (if follow-up, combine relevant context from previous exchange with new query; if new topic, use just the new message)
-                    }"""
-                },
-                *[{"role": msg.role, "content": msg.content} for msg in last_messages[:-1]],
-                {"role": "user", "content": message}
-            ]
-            
-            # Check token count and truncate if needed
-            token_count = count_tokens(analysis_messages, settings.OPENAI_MODEL)
-            logger.info(f"Analysis messages token count: {token_count}")
-            
-            # If over tokens limit, truncate
-            if token_count > 28500:  # Using more conservative limit with safety margin
-                logger.warning(f"Analysis token count ({token_count}) is high. Truncating.")
-                analysis_messages = truncate_messages_to_fit_limit(
-                    analysis_messages,
-                    model=settings.OPENAI_MODEL,
-                    max_tokens=28500,
-                    preserve_system_message=True,
-                    preserve_last_user_message=True
-                )
-                token_count = count_tokens(analysis_messages, settings.OPENAI_MODEL)
-                logger.info(f"Analysis messages token count after truncation: {token_count}")
-
             response = await self.openai_client.chat.completions.create(
                 model=settings.OPENAI_MODEL,
-                messages=analysis_messages,
-                temperature=0.1
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You write search queries for a semantic search over the user's personal notes. "
+                            "Given a conversation and the user's latest message, rewrite the latest message "
+                            "as one standalone search query: resolve pronouns and references to earlier turns "
+                            "into the actual people, topics and dates. If it is already standalone, return it "
+                            "unchanged. Output only the query."
+                        )
+                    },
+                    {"role": "user", "content": f"Conversation:\n{transcript}\n\nLatest message: {message}"}
+                ],
+                max_completion_tokens=150
             )
-
-            analysis = json.loads(response.choices[0].message.content)
-            
-            return {
-                'is_follow_up': analysis['isFollowUp'],
-                'search_query': analysis['searchQuery'],
-                'context': "\n".join(msg.content for msg in last_messages) if analysis['isFollowUp'] else message
-            }
-        except Exception as error:
-            logger.error(f"Error analyzing conversation continuity: {error}")
-            return {
-                'is_follow_up': False,
-                'search_query': message,
-                'context': message
-            }
+            query = (response.choices[0].message.content or "").strip()
+            if query:
+                logger.info(f"Rewrote search query: {message[:60]!r} -> {query[:120]!r}")
+                return query
+        except Exception as e:
+            logger.warning(f"Query rewrite failed, searching with the raw message: {e}")
+        return message
 
     def _generate_context(self, search_results: List[dict], temporal_description: Optional[str] = None) -> str:
         """Generate formatted context from search results."""
@@ -671,14 +614,13 @@ class ChatService:
         """Process a user message and generate a response."""
         logger.info(f"[PROCESS_MESSAGE] process_message started - user_id: {user_id}, thread_id: {thread_id}, content_preview: {content[:50]}...")
         try:
-            # Get user settings
-            user_settings = self.get_user_settings(user_id)
-            
-            # Get conversation analysis
-            conversation_analysis = await self.analyze_conversation_continuity(content, thread_id, user_id) if thread_id else {
-                'is_follow_up': False,
-                'context': ''
-            }
+            # History first: it both verifies the thread belongs to this user and
+            # tells us what a follow-up question is referring to.
+            history_messages: List[Dict[str, str]] = []
+            if thread_id:
+                prior = await self.get_thread_messages(thread_id, user_id)
+                history_messages = [{"role": m.role, "content": m.content} for m in prior[-20:]]  # ~10 turns
+                logger.info(f"[PROCESS_MESSAGE] Loaded {len(history_messages)} history messages from thread {thread_id}")
 
             # Parse query for temporal intent
             parsed_query = self.date_query_parser.parse_query(content)
@@ -686,25 +628,28 @@ class ChatService:
             if parsed_query.has_temporal_intent:
                 logger.info(f"Detected temporal query: {parsed_query.temporal_description} (range: {parsed_query.date_range})")
                 temporal_description = parsed_query.temporal_description
+            query_text = parsed_query.clean_query if parsed_query.has_temporal_intent else content
 
-            # Perform semantic search with date filtering if applicable
-            search_query = SearchQuery(
-                query=parsed_query.clean_query if parsed_query.has_temporal_intent else content,
-                user_id=user_id,
-                date_start=parsed_query.date_range.start if parsed_query.date_range else None,
-                date_end=parsed_query.date_range.end if parsed_query.date_range else None
+            async def run_search() -> List[SearchResult]:
+                text = await self._standalone_search_query(query_text, history_messages) if history_messages else query_text
+                return await self.search_service.search(SearchQuery(
+                    query=text,
+                    user_id=user_id,
+                    date_start=parsed_query.date_range.start if parsed_query.date_range else None,
+                    date_end=parsed_query.date_range.end if parsed_query.date_range else None
+                ))
+
+            user_settings, semantic_results, explicit_results = await asyncio.gather(
+                self.settings_service.get_user_settings(user_id),
+                run_search(),
+                self.get_explicitly_referenced_notes(content, user_id),
             )
-            semantic_results = await self.search_service.search(search_query)
-            
-            # Get explicitly referenced notes
-            explicit_results = await self.get_explicitly_referenced_notes(content, user_id)
-            
-            # Convert SearchResult objects to dictionaries and combine results
+
             explicit_dicts = [result.model_dump() for result in explicit_results]
-            semantic_dicts = [result.model_dump() for result in semantic_results 
-                            if result.model_dump() not in explicit_dicts]
+            explicit_ids = {d['id'] for d in explicit_dicts}
+            semantic_dicts = [r.model_dump() for r in semantic_results if r.id not in explicit_ids]
             all_results = explicit_dicts + semantic_dicts
-            
+
             # Prioritize results to fit within token budget before generating context
             # Use a lower budget to leave room for system message and conversation
             prioritized_results = self._prioritize_search_results(all_results, token_budget=20000)
@@ -712,54 +657,17 @@ class ChatService:
             # Generate context using prioritized results
             context = self._generate_context(prioritized_results, temporal_description)
 
-            # Fetch prior conversation history before saving current message
-            history_messages = []
             if thread_id:
-                try:
-                    prior = await self.get_thread_messages(thread_id, user_id)
-                    for msg in prior[-20:]:  # cap at last 20 messages (~10 turns)
-                        history_messages.append({"role": msg.role, "content": msg.content})
-                    logger.info(f"[PROCESS_MESSAGE] Loaded {len(history_messages)} history messages from thread {thread_id}")
-                except Exception as e:
-                    logger.warning(f"Could not load thread history for context: {e}")
-
-            # If we have a thread, add the user message to it
-            if thread_id:
-                try:
-                    # Verify thread exists and belongs to user
-                    thread = await self.get_thread(thread_id, user_id)
-                    if not thread:
-                        raise HTTPException(
-                            status_code=404,
-                            detail="Chat thread not found or access denied. Please refresh the page and try again."
-                        )
-
-                    # Add user message to database
-                    await self.add_message(thread_id, "user", content)
-
-                except HTTPException:
-                    raise
-                except Exception as e:
-                    logger.error(f"Error saving user message to thread: {e}")
-                    raise HTTPException(
-                        status_code=500,
-                        detail="Failed to save your message. Please try again or refresh the page."
-                    )
+                await self.add_message(thread_id, "user", content)
 
             # Prepare messages for AI with enhanced context
             system_content = f"""{settings.SYSTEM_PROMPT}
 
 MEMORY CONTEXT:
-{user_settings['memory']}
+{user_settings.get('memory') or '(none)'}
 
 ABOUT THE USER:
-{user_settings['personal_info']}
-
-Conversation Analysis:
-{"This is a follow-up question to the previous topic. Consider the previous context while maintaining focus on new information." if conversation_analysis['is_follow_up'] else "This is a new topic. Focus on providing fresh information without being constrained by the previous conversation."}
-
-Current conversation context:
-{conversation_analysis['context']}
+{user_settings.get('personal_info') or '(not provided)'}
 
 Here are the relevant notes and their context:
 

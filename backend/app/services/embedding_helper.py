@@ -101,6 +101,29 @@ _CHAR_REPLACEMENTS = {
 _MAX_EMBEDDING_TOKENS = 8191
 
 
+def embedding_input(chunk: str, title: Optional[str], document_date=None) -> str:
+    """
+    The text actually sent to the embedding model for a stored chunk.
+
+    A chunk from the middle of a daily note says nothing about which note or day
+    it came from, so a query like "what was I worried about in March" cannot
+    match it. Prefixing the title and date puts that in the vector. Only the
+    embedding sees the prefix; the stored `text` stays the raw chunk.
+    """
+    header = (title or '').removesuffix('.md')
+    if document_date:
+        header = f"{header} ({document_date})" if header else str(document_date)
+    return f"{header}\n\n{chunk}" if header else chunk
+
+
+def _embedding_kwargs(model: str) -> dict:
+    """Request arguments for a model; only the text-embedding-3 family takes `dimensions`."""
+    kwargs = {"model": model}
+    if model.startswith("text-embedding-3"):
+        kwargs["dimensions"] = settings.EMBEDDING_DIMENSIONS
+    return kwargs
+
+
 def _prepare_text(text: str) -> str:
     """
     Validate, sanitize and truncate text before embedding.
@@ -190,19 +213,26 @@ def _translate_openai_error(e: Exception) -> None:
 
 
 @retry(**_RETRY_POLICY)
-async def generate_embedding_async(text: str, api_key: Optional[str] = None) -> List[float]:
+async def generate_embedding_async(
+    text: str,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None
+) -> List[float]:
     """
     Generate an embedding without blocking the event loop.
 
     Prefer this over generate_embedding() anywhere inside a request handler.
+    `model` defaults to EMBEDDING_MODEL; pass LEGACY_EMBEDDING_MODEL to query
+    vectors that were stored before the re-embed.
     """
     try:
         prepared = _prepare_text(text)
         client = AsyncOpenAIClient.get_client(api_key)
-        logger.info(f"Using embedding model: {settings.EMBEDDING_MODEL}")
+        model = model or settings.EMBEDDING_MODEL
+        logger.info(f"Using embedding model: {model}")
         response = await client.embeddings.create(
-            model=settings.EMBEDDING_MODEL,
-            input=prepared
+            input=prepared,
+            **_embedding_kwargs(model)
         )
         return _extract_embedding(response)
     except asyncio.TimeoutError as e:
@@ -213,20 +243,45 @@ async def generate_embedding_async(text: str, api_key: Optional[str] = None) -> 
 
 
 @retry(**_RETRY_POLICY)
-def generate_embedding(text: str, api_key: Optional[str] = None) -> List[float]:
+def generate_embedding(
+    text: str,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None
+) -> List[float]:
     """
-    Blocking embedding generation, for synchronous callers such as CLI scripts.
+    Blocking embedding generation, for synchronous callers such as CLI scripts
+    and worker threads.
 
     Inside async code use generate_embedding_async() instead.
     """
     try:
         prepared = _prepare_text(text)
         client = OpenAIClient.get_client(api_key)
-        logger.info(f"Using embedding model: {settings.EMBEDDING_MODEL}")
+        model = model or settings.EMBEDDING_MODEL
+        logger.info(f"Using embedding model: {model}")
         response = client.embeddings.create(
-            model=settings.EMBEDDING_MODEL,
-            input=prepared
+            input=prepared,
+            **_embedding_kwargs(model)
         )
         return _extract_embedding(response)
+    except Exception as e:
+        _translate_openai_error(e)
+
+
+@retry(**_RETRY_POLICY)
+def generate_embeddings_batch(texts: List[str], api_key: Optional[str] = None) -> List[List[float]]:
+    """
+    Embed many texts in one request, for bulk jobs such as the re-embed backfill.
+
+    Returns vectors in the same order as `texts`.
+    """
+    try:
+        prepared = [_prepare_text(t) for t in texts]
+        client = OpenAIClient.get_client(api_key)
+        response = client.embeddings.create(
+            input=prepared,
+            **_embedding_kwargs(settings.EMBEDDING_MODEL)
+        )
+        return [item.embedding for item in sorted(response.data, key=lambda d: d.index)]
     except Exception as e:
         _translate_openai_error(e)

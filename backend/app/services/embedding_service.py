@@ -1,10 +1,10 @@
 from typing import List, Optional
 from supabase import Client, create_client
-from .embedding_helper import generate_embedding_async
+from .embedding_helper import generate_embedding_async, embedding_input
 from ..core.config import get_settings
 from ..models.file import EmbeddingCreate, EmbeddingDB
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from uuid import UUID, uuid4
 import json
 
@@ -110,9 +110,16 @@ class EmbeddingService:
         text: str, 
         file_id: str, 
         user_id: str,
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
+        title: Optional[str] = None,
+        document_date: Optional[date] = None
     ) -> List[EmbeddingDB]:
-        """Generate embeddings for text chunks and save to Supabase."""
+        """
+        Generate embeddings for text chunks and save to Supabase.
+
+        `title` and `document_date` are folded into what gets embedded (see
+        embedding_input) so each chunk's vector knows which note and day it is from.
+        """
         try:
             # Validate input
             if not text.strip():
@@ -152,7 +159,9 @@ class EmbeddingService:
                         logger.debug(f"Chunk preview: {chunk[:100]}...")
                         
                         # Generate embedding with timeout and retry
-                        embedding = await generate_embedding_async(chunk, api_key)
+                        embedding = await generate_embedding_async(
+                            embedding_input(chunk, title, document_date), api_key
+                        )
                         if not embedding or not isinstance(embedding, list):
                             error_msg = f"Invalid embedding generated for chunk {chunk_index}"
                             logger.error(error_msg)
@@ -166,6 +175,8 @@ class EmbeddingService:
                             'file_id': str(file_uuid),
                             'user_id': str(user_uuid),
                             'embedding': json.dumps(embedding),
+                            # pgvector parses its text form, which is the JSON list syntax
+                            'embedding_vec': json.dumps(embedding),
                             'text': chunk,
                             'chunk_index': chunk_index,
                             'created_at': datetime.utcnow().replace(microsecond=0).isoformat()

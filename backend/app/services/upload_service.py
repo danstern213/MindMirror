@@ -317,7 +317,9 @@ class UploadService:
                             text_content,
                             str(file_record.id),
                             str(user_id),
-                            api_key
+                            api_key,
+                            title=file_record.title,
+                            document_date=document_date
                         )
                         # Clear text content from memory after embedding generation
                         del text_content
