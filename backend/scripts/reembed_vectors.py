@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -86,9 +87,16 @@ def main():
     failed_ids = set()
     done = 0
 
+    # The Supabase client's HTTP connection is not safe to share across
+    # threads (it produced broken pipes and garbled requests), so each update
+    # worker gets its own.
+    local = threading.local()
+
     def write(row_and_vector):
         row_id, vector = row_and_vector
-        supabase.table('embeddings').update({'embedding_vec': json.dumps(vector)}).eq('id', row_id).execute()
+        if not hasattr(local, 'client'):
+            local.client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+        local.client.table('embeddings').update({'embedding_vec': json.dumps(vector)}).eq('id', row_id).execute()
 
     while True:
         # Finished rows drop out of the null filter, so the first page is always
