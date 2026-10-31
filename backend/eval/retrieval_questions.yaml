@@ -1,0 +1,49 @@
+# Retrieval eval: questions whose answer lives in a known note.
+#
+# Phrased the way you'd actually ask, mostly NOT echoing the note's title, so a
+# hit means the search understood the question rather than string-matched it.
+# `expect` lists acceptable titles (any one counts). Add a question whenever
+# chat misses a note you know exists; that's the most valuable kind.
+#
+#   python3 scripts/eval_retrieval.py --mode both
+
+- question: what kind of work do I not want to do in my career?
+  expect: ["What do I want my ideal life to look like.md"]
+- question: how do the people closest to me describe my personality?
+  expect: ["Strengths Finding.md"]
+- question: what have I written about my anxiety and that creeping sense of dread?
+  expect: ["Psychedelics.md"]
+- question: why did I fall short on my writing goals that quarter?
+  expect: ["Q2 2021 Review.md"]
+- question: was I worried our product didn't have real traction with users?
+  expect: ["Retrospective Week July 13.md"]
+- question: what's the trick for beating procrastination I picked up from that course on learning?
+  expect: ["Learning How To Learn.md"]
+- question: how should I treat setbacks that get in my way?
+  expect: ["The Obstacle Is the Way.md"]
+- question: is life actually too short, or do I just waste my time?
+  expect: ["On The Shortness of Life Seneca.md"]
+- question: should a leader ever trade quality for speed?
+  expect: ["Amp It Up.md"]
+- question: should we reform old institutions or replace them with decentralized ones?
+  expect: ["Help institutions vs decentralization.md"]
+- question: why did I want to reconnect with my religion and find a spiritual community?
+  expect: ["Temple.md"]
+- question: what feedback did I give a teammate about data quality and being decisive on scope?
+  expect: ["Feedback for Maurice.md"]
+- question: what did I make of the idea that war produces virtue?
+  expect: ["Gates of Fire.md"]
+- question: why was I drawn to investing in collectibles?
+  expect: ["Collectable Assets as the future with tradition.md"]
+- question: what are Jordan Peterson's rules for living?
+  expect: ["12 Rules for Life.md"]
+- question: radical transparency and how to make decisions as an organization
+  expect: ["Principles Ray Dalio.md"]
+- question: what did I learn about how China is governed and its economic model?
+  expect: ["On China.md", "The China Model's Challenge to Democratic Capitalism.md"]
+- question: the C.S. Lewis story about a bus ride from hell to heaven
+  expect: ["The Great Divorce.md"]
+- question: Steinbeck's road trip across America with his dog
+  expect: ["Travels with Charley.md"]
+- question: the Sartre novel about existential disgust
+  expect: ["Nausea.md"]

@@ -18,7 +18,13 @@ class Settings(BaseSettings):
     # OpenAI
     OPENAI_API_KEY: str
     OPENAI_MODEL: str = "gpt-5.6-sol"
-    EMBEDDING_MODEL: str = "text-embedding-ada-002"
+    EMBEDDING_MODEL: str = "text-embedding-3-large"
+    # text-embedding-3 models can be shortened; 1536 keeps the vector(1536)
+    # column and leaves room for an HNSW index (capped at 2000 dims) later.
+    EMBEDDING_DIMENSIONS: int = 1536
+    # What the rows in the old JSON `embedding` column were embedded with. The
+    # legacy search path has to embed queries with this same model.
+    LEGACY_EMBEDDING_MODEL: str = "text-embedding-ada-002"
     
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = [

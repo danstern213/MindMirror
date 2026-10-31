@@ -2,9 +2,10 @@ from typing import List, Optional, Dict, Any, Set
 from datetime import date, timedelta
 from uuid import UUID
 from supabase import Client, create_client
+import asyncio
 import json
 import logging
-from .embedding_helper import generate_embedding_async
+from .embedding_helper import generate_embedding_async, generate_embedding
 from .search_helper import (
     cosine_similarity,
     extract_keywords,
@@ -21,6 +22,11 @@ DATE_BOOST_WITHIN_RANGE = 0.15  # Boost for documents within the date range
 DATE_BOOST_NEAR_RANGE = 0.08  # Boost for documents within 7 days of range
 DATE_BOOST_DECAY_DAYS = 30  # Days over which date boost decays to zero
 DATE_MATCH_SCORE = 0.95  # Score for date-matched results (high but allows semantic to rank higher)
+
+VECTOR_MATCH_COUNT = 150  # Chunks pulled from pgvector per query, before grouping by note
+MAX_CHUNKS_PER_DOCUMENT = 5
+LEGACY_SIMILARITY_THRESHOLD = 0.75  # ada-002 scale; text-embedding-3 scores run much lower
+EXPLICIT_NOTE_MAX_CHARS = 40000  # ~10K tokens, so one huge linked note cannot crowd out everything else
 
 class SearchService:
     def __init__(self, supabase_client: Optional[Client] = None):
@@ -183,168 +189,178 @@ class SearchService:
             date_matched_ids = {str(r.id) for r in date_matched_results}
             logger.info(f"Pre-fetched {len(date_matched_results)} date-matched documents")
 
-        # Generate query embedding
-        query_embedding = await generate_embedding_async(search_query.query, api_key)
-
-        # Initialize constants
-        similarity_threshold = 0.75  # Match src implementation
-        page_size = 500  # Reduced batch size for memory efficiency
-
         try:
-            # Process embeddings in batches and maintain only the top results
-            grouped_results: Dict[str, Dict[str, Any]] = {}
-            offset = 0
-            
-            while True:
-                logger.info(f"Fetching batch at offset {offset}")
-                query = self.supabase.table('embeddings')\
-                    .select('*, files!inner(title, document_date)')\
-                    .eq('user_id', str(search_query.user_id))
-
-                # Apply date filtering if specified
-                if search_query.date_start:
-                    query = query.gte('files.document_date', search_query.date_start.isoformat())
-                if search_query.date_end:
-                    query = query.lte('files.document_date', search_query.date_end.isoformat())
-
-                response = query.limit(page_size)\
-                    .offset(offset)\
-                    .execute()
-                
-                if hasattr(response, 'error') and response.error:
-                    logger.error(f"Error fetching embeddings: {response.error}")
-                    return []
-                
-                if not response.data:
-                    break
-                
-                batch_size = len(response.data)
-                logger.info(f"Processing batch of {batch_size} embeddings")
-                
-                # Process each embedding in the batch
-                for item in response.data:
-                    embedding = json.loads(item['embedding']) if isinstance(item['embedding'], str) else item['embedding']
-                    score = cosine_similarity(query_embedding, embedding)
-
-                    if score >= similarity_threshold:
-                        doc_id = item['file_id']
-                        # Parse document date
-                        doc_date = self._parse_document_date(item['files'].get('document_date'))
-
-                        if doc_id not in grouped_results:
-                            grouped_results[doc_id] = {
-                                'id': doc_id,
-                                'score': score,
-                                'chunks': [],
-                                'title': item['files']['title'],
-                                'document_date': doc_date
-                            }
-                        # Only keep the top 5 chunks per document
-                        if len(grouped_results[doc_id]['chunks']) < 5:
-                            grouped_results[doc_id]['chunks'].append({
-                                'text': item['text'],
-                                'score': score
-                            })
-                        else:
-                            # Replace lower scoring chunk if this one is better
-                            min_chunk = min(grouped_results[doc_id]['chunks'], key=lambda x: x['score'])
-                            if score > min_chunk['score']:
-                                grouped_results[doc_id]['chunks'].remove(min_chunk)
-                                grouped_results[doc_id]['chunks'].append({
-                                    'text': item['text'],
-                                    'score': score
-                                })
-                
-                if batch_size < page_size:
-                    break
-                    
-                offset += page_size
-            
-            logger.info(f"Found {len(grouped_results)} relevant documents")
-            
-            # Extract keywords once for all documents
-            keywords = extract_keywords(search_query.query)
-            results: List[SearchResult] = []
-            
-            # Process each document's results
-            for doc_id, data in grouped_results.items():
-                # Sort chunks by score
-                sorted_chunks = sorted(data['chunks'], key=lambda x: x['score'], reverse=True)
-
-                # Combine text from chunks
-                combined_text = '\n'.join(chunk['text'] for chunk in sorted_chunks)
-
-                # Calculate keyword score
-                keyword_score = calculate_keyword_score(combined_text, keywords)
-                matched_keywords = [k for k in keywords if k.lower() in combined_text.lower()]
-
-                # Calculate date boost if temporal query
-                date_boost = self._calculate_date_boost(
-                    data.get('document_date'),
-                    search_query.date_start,
-                    search_query.date_end
-                )
-                boosted_score = min(1.0, data['score'] + date_boost)
-
-                if date_boost > 0:
-                    logger.debug(f"Applied date boost {date_boost:.3f} to {data['title']} (date: {data.get('document_date')})")
-
-                results.append(SearchResult(
-                    id=doc_id,
-                    score=boosted_score,
-                    content=combined_text,
-                    title=data['title'],
-                    keyword_score=keyword_score,
-                    matched_keywords=matched_keywords,
-                    document_date=data.get('document_date')
-                ))
-
-            # Combine date-matched results with semantic results
-            # Add date-matched documents that weren't found by semantic search
-            # This ensures temporal queries return ALL content from that date
-            semantic_result_ids = {str(r.id) for r in results}
-            added_date_matches = 0
-
-            for date_result in date_matched_results:
-                if str(date_result.id) not in semantic_result_ids:
-                    results.append(date_result)
-                    added_date_matches += 1
-
-            if added_date_matches > 0:
-                logger.info(f"Added {added_date_matches} date-matched documents not found by semantic search")
-
-            # Sort and return top results
-            sorted_results = sorted(results, key=lambda x: x.score, reverse=True)
-            return sorted_results[:50]
-            
+            chunks = await self._vector_search_chunks(search_query, api_key)
         except Exception as e:
-            logger.error(f"Error fetching embeddings from Supabase: {e}")
-            return []
+            # Most likely the migration has not been applied yet.
+            logger.warning(f"pgvector search unavailable, falling back to legacy scan: {e}")
+            chunks = []
+        if not chunks:
+            logger.info("No pgvector results (backfill not run yet?); using legacy scan")
+            chunks = await asyncio.to_thread(self._legacy_scan_chunks, search_query, api_key)
+
+        keywords = extract_keywords(search_query.query)
+        results = _group_chunks_by_document(chunks, keywords)
+
+        for result in results:
+            date_boost = self._calculate_date_boost(
+                result.document_date, search_query.date_start, search_query.date_end
+            )
+            result.score = min(1.0, result.score + date_boost)
+
+        # Add date-matched documents the semantic search missed, so a query about
+        # a specific day returns that day's notes even when they score low.
+        semantic_result_ids = {str(r.id) for r in results}
+        added_date_matches = 0
+        for date_result in date_matched_results:
+            if str(date_result.id) not in semantic_result_ids:
+                results.append(date_result)
+                added_date_matches += 1
+        if added_date_matches > 0:
+            logger.info(f"Added {added_date_matches} date-matched documents not found by semantic search")
+
+        sorted_results = sorted(results, key=lambda x: x.score, reverse=True)
+        logger.info(f"Found {len(sorted_results)} relevant documents")
+        return sorted_results[:50]
+
+    async def _vector_search_chunks(
+        self,
+        search_query: SearchQuery,
+        api_key: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Top chunks by cosine similarity, scored inside Postgres (match_embeddings)."""
+        query_embedding = await generate_embedding_async(search_query.query, api_key)
+        params = {
+            'query_embedding': query_embedding,
+            'match_user_id': str(search_query.user_id),
+            'match_count': VECTOR_MATCH_COUNT,
+            'date_start': search_query.date_start.isoformat() if search_query.date_start else None,
+            'date_end': search_query.date_end.isoformat() if search_query.date_end else None,
+        }
+        # The Supabase client is synchronous; keep it off the event loop.
+        response = await asyncio.to_thread(
+            lambda: self.supabase.rpc('match_embeddings', params).execute()
+        )
+        return [
+            {
+                'file_id': row['file_id'],
+                'chunk_index': row.get('chunk_index'),
+                'text': row['text'],
+                'score': row['similarity'],
+                'title': row['title'],
+                'document_date': self._parse_document_date(row.get('document_date')),
+            }
+            for row in response.data or []
+        ]
+
+    def _legacy_scan_chunks(
+        self,
+        search_query: SearchQuery,
+        api_key: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Pre-pgvector search: download every ada-002 vector and score it in Python.
+
+        Slow (about a second per 1,000 chunks) and blocking, so it runs in a
+        worker thread. Kept only as a fallback until the backfill has run; delete
+        it, and the JSON `embedding` column, once the pgvector path is proven.
+        """
+        query_embedding = generate_embedding(search_query.query, api_key, model=settings.LEGACY_EMBEDDING_MODEL)
+        chunks: List[Dict[str, Any]] = []
+        offset = 0
+        page_size = 500
+        while True:
+            query = self.supabase.table('embeddings')\
+                .select('file_id, chunk_index, text, embedding, files!inner(title, document_date)')\
+                .eq('user_id', str(search_query.user_id))
+            if search_query.date_start:
+                query = query.gte('files.document_date', search_query.date_start.isoformat())
+            if search_query.date_end:
+                query = query.lte('files.document_date', search_query.date_end.isoformat())
+            rows = query.limit(page_size).offset(offset).execute().data
+            if not rows:
+                break
+            for item in rows:
+                embedding = json.loads(item['embedding']) if isinstance(item['embedding'], str) else item['embedding']
+                score = cosine_similarity(query_embedding, embedding)
+                if score >= LEGACY_SIMILARITY_THRESHOLD:
+                    chunks.append({
+                        'file_id': item['file_id'],
+                        'chunk_index': item.get('chunk_index'),
+                        'text': item['text'],
+                        'score': score,
+                        'title': item['files']['title'],
+                        'document_date': self._parse_document_date(item['files'].get('document_date')),
+                    })
+            if len(rows) < page_size:
+                break
+            offset += page_size
+        return chunks
 
     async def search_by_title(self, title: str, user_id: str) -> Optional[SearchResult]:
-        """Search for a file by its exact title."""
+        """
+        Load a note the user linked as [[title]], in full and in reading order.
+
+        Titles are stored with their extension ("Note.md") but people link both
+        ways, so either spelling matches.
+        """
+        base = title.strip().removesuffix('.md')
         try:
-            # Query the files table for an exact title match
             response = self.supabase.table('files')\
-                .select('*, embeddings(text)')\
-                .eq('title', title)\
+                .select('id, title, document_date, embeddings(text, chunk_index)')\
+                .in_('title', [base, f"{base}.md"])\
                 .eq('user_id', user_id)\
                 .execute()
-            
+
             if not response.data:
                 return None
-            
+
             file = response.data[0]
-            content = file['embeddings'][0]['text'] if file.get('embeddings') else ""
-            
+            chunks = sorted(file.get('embeddings') or [], key=lambda e: e.get('chunk_index') or 0)
+            content = '\n'.join(c['text'] for c in chunks if c.get('text'))
+            if len(content) > EXPLICIT_NOTE_MAX_CHARS:
+                content = content[:EXPLICIT_NOTE_MAX_CHARS] + "\n[...note truncated...]"
+
             return SearchResult(
                 id=file['id'],
                 score=1.0,  # Maximum relevance for exact title match
                 content=content,
-                title=title,
+                title=file['title'],
                 explicit=True,
-                full_content=content
+                full_content=content,
+                document_date=self._parse_document_date(file.get('document_date'))
             )
         except Exception as e:
             logger.error(f"Error searching by title: {e}")
-            return None 
+            return None
+
+
+def _group_chunks_by_document(chunks: List[Dict[str, Any]], keywords: List[str]) -> List[SearchResult]:
+    """
+    Collapse chunk hits into one result per note.
+
+    A note scores as its BEST chunk. (The old loop kept whichever chunk the
+    database happened to return first, so ranking between notes was close to
+    arbitrary.) Its content is its top chunks, put back in reading order.
+    """
+    by_doc: Dict[str, List[Dict[str, Any]]] = {}
+    for chunk in chunks:
+        by_doc.setdefault(str(chunk['file_id']), []).append(chunk)
+
+    results = []
+    for doc_id, doc_chunks in by_doc.items():
+        top = sorted(doc_chunks, key=lambda c: c['score'], reverse=True)[:MAX_CHUNKS_PER_DOCUMENT]
+        in_order = sorted(top, key=lambda c: c.get('chunk_index') or 0)
+        combined_text = '\n'.join(c['text'] for c in in_order)
+        results.append(SearchResult(
+            id=doc_id,
+            score=top[0]['score'],
+            content=combined_text,
+            title=top[0]['title'],
+            # Shown to the model as context only; not used for ranking until
+            # the retrieval eval shows it helps.
+            keyword_score=calculate_keyword_score(combined_text, keywords),
+            matched_keywords=[k for k in keywords if k.lower() in combined_text.lower()],
+            document_date=top[0].get('document_date'),
+        ))
+    return results
