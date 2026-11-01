@@ -18,7 +18,7 @@ Environment variables:
 import os
 import sys
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Add the scripts directory to the path so we can import file_sync
@@ -77,6 +77,20 @@ def get_local_md_files(watch_dir: Path) -> list[Path]:
     return sorted(files)
 
 
+def edited_since(file_path: Path, uploaded_at: str | None) -> bool:
+    """True when the local file was modified after the server's copy was uploaded."""
+    if not uploaded_at:
+        return False
+    try:
+        uploaded = datetime.fromisoformat(uploaded_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if uploaded.tzinfo is None:
+        uploaded = uploaded.replace(tzinfo=timezone.utc)
+    modified = datetime.fromtimestamp(file_path.stat().st_mtime, tz=timezone.utc)
+    return modified > uploaded
+
+
 def main():
     api_url = os.environ.get("SYNC_API_URL", "http://localhost:8000/api/v1")
     api_key = os.environ.get("SYNC_API_KEY")
@@ -109,23 +123,33 @@ def main():
     # Fetch already-uploaded filenames from the API
     with SyncAPIClient(api_url, api_key) as client:
         remote_files = client.list_files()
-        remote_filenames = {rf.filename for rf in remote_files}
-        logger.info(f"Found {len(remote_filenames)} files already uploaded")
+        remote_uploaded_at = {rf.filename: rf.created_at for rf in remote_files}
+        logger.info(f"Found {len(remote_uploaded_at)} files already uploaded")
 
-        # Upload files that don't exist remotely
+        # Upload files that don't exist remotely, and re-upload ones edited
+        # since. A daily note is often synced while still a blank template and
+        # written in later; without this the server keeps the blank copy forever.
         uploaded = 0
         skipped = 0
         failed = 0
         uploaded_files = []
 
         for file_path in local_files:
-            if file_path.name in remote_filenames:
+            if file_path.name in remote_uploaded_at and not edited_since(file_path, remote_uploaded_at[file_path.name]):
                 logger.debug(f"Skipped (already uploaded): {file_path.name}")
                 skipped += 1
                 continue
 
             try:
-                result = client.upload_file(file_path)
+                if file_path.name in remote_uploaded_at:
+                    result = client.replace_file(file_path)
+                else:
+                    result = client.upload_file(file_path)
+                    # The listing can miss files (it is capped), so the server's
+                    # duplicate check is what finds them; it reports when the
+                    # stored copy was uploaded.
+                    if result.get("status") == "skipped" and edited_since(file_path, result.get("upload_time")):
+                        result = client.replace_file(file_path)
                 if result.get("status") == "skipped":
                     logger.info(f"Skipped (duplicate on server): {file_path.name}")
                     skipped += 1

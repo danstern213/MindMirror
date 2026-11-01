@@ -13,7 +13,7 @@
 # Still missed by both: "ideal life", "anxiety and dread", "product traction".
 
 - question: what kind of work do I not want to do in my career?
-  expect: ["What do I want my ideal life to look like.md"]
+  expect: ["What do I want my ideal life to look like?.md", "What do I want my ideal life to look like.md"]
 - question: how do the people closest to me describe my personality?
   expect: ["Strengths Finding.md"]
 - question: what have I written about my anxiety and that creeping sense of dread?
