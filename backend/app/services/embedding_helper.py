@@ -22,37 +22,32 @@ class AsyncOpenAIClient:
     HTTP call, so one user's search blocks every other user's request.
     """
     _instance: Optional[AsyncOpenAI] = None
-    _api_key: Optional[str] = None
 
     @classmethod
     def get_client(cls, api_key: Optional[str] = None) -> AsyncOpenAI:
-        if api_key and (cls._instance is None or api_key != cls._api_key):
-            logger.info("Creating new async OpenAI client with provided API key")
-            cls._instance = AsyncOpenAI(api_key=api_key, timeout=EMBEDDING_TIMEOUT)
-            cls._api_key = api_key
-        elif cls._instance is None:
+        # A caller's key gets a client of its own. Caching it as the shared
+        # client once let one bad key (an app key sent by the sync script) break
+        # every user's search until the server restarted.
+        if api_key and api_key != settings.OPENAI_API_KEY:
+            return AsyncOpenAI(api_key=api_key, timeout=EMBEDDING_TIMEOUT)
+        if cls._instance is None:
             logger.info("Creating new async OpenAI client with settings API key")
             cls._instance = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, timeout=EMBEDDING_TIMEOUT)
-            cls._api_key = settings.OPENAI_API_KEY
         return cls._instance
 
 
 class OpenAIClient:
     _instance: Optional[OpenAI] = None
-    _api_key: Optional[str] = None
 
     @classmethod
     def get_client(cls, api_key: Optional[str] = None) -> OpenAI:
-        """Get or create OpenAI client instance."""
+        """The shared client on the server's key, or a client of its own for a caller's key."""
         try:
-            if api_key and (cls._instance is None or api_key != cls._api_key):
-                logger.info("Creating new OpenAI client with provided API key")
-                cls._instance = OpenAI(api_key=api_key, timeout=EMBEDDING_TIMEOUT)
-                cls._api_key = api_key
-            elif cls._instance is None:
+            if api_key and api_key != settings.OPENAI_API_KEY:
+                return OpenAI(api_key=api_key, timeout=EMBEDDING_TIMEOUT)
+            if cls._instance is None:
                 logger.info("Creating new OpenAI client with settings API key")
                 cls._instance = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=EMBEDDING_TIMEOUT)
-                cls._api_key = settings.OPENAI_API_KEY
             return cls._instance
         except Exception as e:
             logger.error(f"Error creating OpenAI client: {str(e)}")

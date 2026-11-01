@@ -192,11 +192,10 @@ async def replace_file(
 
         del content
 
-        # Get API key for embedding service if present
-        api_key = request.headers.get('X-API-Key')
-
+        # X-API-Key is this app's own key (ak_...), used to sign in; it is not an
+        # OpenAI key, so embeddings use the server's key.
         try:
-            response = await service.replace_file(file, current_user_id, api_key)
+            response = await service.replace_file(file, current_user_id)
             logger.info(f"File replace successful: {response.file_id}")
             return response
         except HTTPException:

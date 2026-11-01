@@ -9,7 +9,7 @@ import pytest
 from app.models.search import SearchQuery
 from app.services import search_service as search_module
 from app.services.chat_service import ChatService
-from app.services.embedding_helper import _embedding_kwargs, embedding_input
+from app.services.embedding_helper import AsyncOpenAIClient, OpenAIClient, _embedding_kwargs, embedding_input
 from app.services.search_service import SearchService, _group_chunks_by_document
 
 
@@ -53,6 +53,19 @@ def test_embedding_input_prefixes_title_and_date():
     assert embedding_input("body", "2025-03-14.md", date(2025, 3, 14)) == "2025-03-14 (2025-03-14)\n\nbody"
     assert embedding_input("body", "Temple.md", None) == "Temple\n\nbody"
     assert embedding_input("body", None, None) == "body"
+
+
+def test_a_callers_key_never_replaces_the_shared_openai_client():
+    # The sync script's app key (ak_...) reached the embedding client once and
+    # became the shared client, so every search after it failed with a 401.
+    for client_class in (AsyncOpenAIClient, OpenAIClient):
+        client_class._instance = None
+        shared = client_class.get_client()
+        other = client_class.get_client("ak_not_an_openai_key")
+        assert other is not shared
+        assert other.api_key == "ak_not_an_openai_key"
+        assert client_class.get_client() is shared
+        assert shared.api_key == "test-key"
 
 
 def test_dimensions_only_sent_to_text_embedding_3_models():
