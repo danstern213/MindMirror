@@ -40,7 +40,10 @@ class EmbeddingService:
         chunks = []
         start = 0
         last_start = -1  # Track last starting position to detect infinite loops
-        max_iterations = (len(text) // (chunk_size - overlap)) + 2  # Maximum possible chunks plus safety margin
+        # Break points are only taken past the middle of the window, so every
+        # chunk advances by at least half a chunk less the overlap.
+        min_break = chunk_size // 2
+        max_iterations = (len(text) // max(1, min_break - overlap)) + 2  # Maximum possible chunks plus safety margin
         iteration = 0
         
         while start < len(text) and iteration < max_iterations:
@@ -62,7 +65,11 @@ class EmbeddingService:
                     # Try to break at paragraph or sentence
                     break_found = False
                     for separator in ['\n\n', '\n', '. ', ' ']:
-                        pos = text[start:end].rfind(separator)
+                        # Searching the whole window used to find a paragraph
+                        # break near its start, cut a tiny chunk, then creep
+                        # forward a character at a time until the iteration cap
+                        # stopped the loop and the rest of the note was dropped.
+                        pos = text[start:end].rfind(separator, min_break)
                         if pos != -1:
                             end = start + pos + len(separator)
                             break_found = True
@@ -80,6 +87,11 @@ class EmbeddingService:
                     chunks.append(chunk)
                     logger.debug(f"Created chunk {len(chunks)}: {chunk[:50]}...")
                 
+                # The last chunk reached the end; stepping back by the overlap
+                # would only repeat its tail as extra chunks.
+                if end >= len(text):
+                    break
+
                 # Ensure we're making forward progress
                 new_start = end - overlap
                 if new_start <= start:

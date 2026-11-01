@@ -177,6 +177,25 @@ class DateExtractionService:
 
         return None
 
+    # Roam and Obsidian exports start each page with a header like
+    # "---\ncreated: 2022-08-18 08:39:03\n---": when the page was first written.
+    FRONTMATTER_CREATED_PATTERN = re.compile(
+        r'\A---\s*\n(?:.*\n)*?created:\s*(\d{4})-(\d{2})-(\d{2})', re.IGNORECASE
+    )
+
+    def extract_date_from_frontmatter(self, text: str) -> Optional[ExtractedDate]:
+        """The `created:` date from a note's front matter, if it has one."""
+        match = self.FRONTMATTER_CREATED_PATTERN.match(text or '')
+        if not match:
+            return None
+        try:
+            extracted = date(*map(int, match.groups()))
+        except ValueError:
+            return None
+        if extracted.year < 1990 or extracted > date.today():
+            return None
+        return ExtractedDate(date=extracted, source='frontmatter', confidence=0.9)
+
     def extract_date_with_fallback(
         self,
         filename: str,

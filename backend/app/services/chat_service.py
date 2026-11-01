@@ -2,8 +2,10 @@ from typing import List, Optional, Dict, Any, AsyncGenerator
 from datetime import datetime, timezone, date
 from uuid import UUID, uuid4
 import asyncio
+import json
 import logging
 import re
+from dataclasses import dataclass
 from fastapi import HTTPException
 from openai import AsyncOpenAI
 from supabase import Client
@@ -47,6 +49,71 @@ _CHARS_PER_TOKEN = 4
 
 def _estimate_tokens(text: str) -> int:
     return len(text) // _CHARS_PER_TOKEN
+
+
+@dataclass
+class SearchPlan:
+    query: str
+    date_start: Optional[date] = None
+    date_end: Optional[date] = None
+    period: Optional[str] = None  # how to name the range to the model, e.g. "March 2025"
+
+
+@dataclass
+class PromptContext:
+    system_content: str
+    sources: List[dict]
+    plan: SearchPlan
+    # Which notes made it in, by section; the context eval reads these.
+    recent_titles: List[str]
+    range_titles: List[str]
+    fragment_titles: List[str]
+
+
+# Anything that might be a reference to time. A miss here only means the date
+# parser runs instead of the model, so it errs wide.
+TIME_HINT = re.compile(
+    r"\b((19|20)\d{2}|jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|june?|july?|aug(ust)?|sept?(ember)?"
+    r"|oct(ober)?|nov(ember)?|dec(ember)?|spring|summer|fall|autumn|winter|q[1-4]|quarter"
+    r"|yesterday|today|tonight|week|weekend|month|year|ago|last|this|past|previous|recent(ly)?"
+    r"|since|until|during|before|after|early|late|mid|lately|then)\b",
+    re.IGNORECASE,
+)
+
+SEARCH_PLAN_PROMPT = """You plan searches over the user's personal notes. Each note is dated by the day it was written. Today is {today}.
+
+Given the conversation and the user's latest message, return JSON:
+{{"query": "...", "start": "YYYY-MM-DD" or null, "end": "YYYY-MM-DD" or null, "period": "..." or null}}
+
+query: the latest message as one standalone search query. Resolve pronouns and references to earlier turns into the actual people, topics and dates. Leave out the time phrase when you return a date range; if nothing else is left, describe what to look for, e.g. "what I was doing, working on and thinking about".
+start/end: only when the message asks about what the user wrote, did or thought during a period of time (including a follow-up about a period named earlier). Whole periods: "March 2025" is 2025-03-01 to 2025-03-31, "2024" is the whole year, "last spring" is March through May of the most recent spring that has ended, "Q1" is January through March. Use null for both when no period is meant, including when a date is only part of a topic ("my notes on the 2008 crisis") or when you cannot tell which dates are meant ("when my daughter was born").
+period: a short name for the range, e.g. "March 2025" or "spring 2026"; null without a range."""
+
+
+def _parse_search_plan(raw: str, today: date) -> Optional[SearchPlan]:
+    """The model's JSON as a SearchPlan, or None if it is unusable. Bad dates drop the range, not the query."""
+    try:
+        data = json.loads(raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```"))
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    query = str(data.get("query") or "").strip()
+    if not query:
+        return None
+    try:
+        start = date.fromisoformat(data["start"]) if data.get("start") else None
+        end = date.fromisoformat(data["end"]) if data.get("end") else None
+    except (TypeError, ValueError):
+        start = end = None
+    if start and end and start > end:
+        start, end = end, start
+    if start and not end:
+        end = today
+    if end and not start:
+        start = date(1990, 1, 1)
+    period = str(data.get("period") or "").strip() or None if start else None
+    return SearchPlan(query=query, date_start=start, date_end=end, period=period)
 
 
 def _format_datetime_for_db(dt: datetime) -> str:
@@ -442,41 +509,48 @@ class ChatService:
             msg = first_message.strip()
             return msg[:37] + "..." if len(msg) > 40 else msg
 
-    async def _standalone_search_query(self, message: str, history: List[Dict[str, str]]) -> str:
+    async def _plan_search(
+        self, message: str, history: List[Dict[str, str]], today: Optional[date] = None
+    ) -> SearchPlan:
         """
-        Turn a follow-up like "what about the second one?" into a query that
-        stands on its own, so the note search knows what "the second one" is.
+        What to search for: a standalone query and, if the message asks about a
+        period of time, its date range.
 
-        Only called when there is history. Falls back to the raw message on any
-        failure; a worse search beats a failed response.
+        Follow-ups ("what about the second one?") need the conversation to mean
+        anything, and time can be said a hundred ways ("last spring", "Q1 2025",
+        "the year before last"), so a model reads the message instead of a list
+        of patterns. Skipped when the message has no history and no hint of
+        time, to keep plain questions fast. If the model fails, the regex parser
+        still catches the common phrasings.
         """
-        recent = history[-6:]
-        transcript = "\n".join(f"{m['role']}: {m['content'][:1000]}" for m in recent)
+        if not history and not TIME_HINT.search(message):
+            return SearchPlan(query=message)
+
+        today = today or date.today()
+        transcript = "\n".join(f"{m['role']}: {m['content'][:1000]}" for m in history[-6:])
         try:
             response = await self.openai_client.chat.completions.create(
                 model=settings.OPENAI_MODEL,
                 messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You write search queries for a semantic search over the user's personal notes. "
-                            "Given a conversation and the user's latest message, rewrite the latest message "
-                            "as one standalone search query: resolve pronouns and references to earlier turns "
-                            "into the actual people, topics and dates. If it is already standalone, return it "
-                            "unchanged. Output only the query."
-                        )
-                    },
-                    {"role": "user", "content": f"Conversation:\n{transcript}\n\nLatest message: {message}"}
+                    {"role": "system", "content": SEARCH_PLAN_PROMPT.format(today=today.isoformat())},
+                    {"role": "user", "content": (f"Conversation:\n{transcript}\n\n" if transcript else "")
+                        + f"Latest message: {message}"}
                 ],
-                max_completion_tokens=150
+                response_format={"type": "json_object"},
+                max_completion_tokens=300
             )
-            query = (response.choices[0].message.content or "").strip()
-            if query:
-                logger.info(f"Rewrote search query: {message[:60]!r} -> {query[:120]!r}")
-                return query
+            plan = _parse_search_plan(response.choices[0].message.content or "", today)
+            if plan:
+                logger.info(f"Search plan for {message[:60]!r}: {plan}")
+                return plan
         except Exception as e:
-            logger.warning(f"Query rewrite failed, searching with the raw message: {e}")
-        return message
+            logger.warning(f"Search planning failed, falling back to the date parser: {e}")
+
+        parsed = self.date_query_parser.parse_query(message)
+        if parsed.has_temporal_intent and parsed.date_range:
+            return SearchPlan(query=parsed.clean_query, date_start=parsed.date_range.start,
+                              date_end=parsed.date_range.end, period=parsed.temporal_description)
+        return SearchPlan(query=message)
 
     def _generate_context(self, search_results: List[dict], temporal_description: Optional[str] = None) -> str:
         """Generate formatted context from search results."""
@@ -612,6 +686,97 @@ class ChatService:
         logger.info(f"Prioritized {len(prioritized_results)} out of {len(search_results)} search results to fit token budget")
         return prioritized_results
         
+    async def _build_prompt(
+        self, content: str, history: List[Dict[str, str]], user_id: UUID, today: Optional[date] = None
+    ) -> PromptContext:
+        """
+        The system prompt for one message: instructions, who the user is, the
+        last month of notes whole, every note from a period the message asks
+        about, and search fragments from everything else.
+        """
+        plan = await self._plan_search(content, history, today)
+
+        user_settings, semantic_results, explicit_results, recent_notes = await asyncio.gather(
+            self.settings_service.get_user_settings(user_id),
+            self.search_service.search(SearchQuery(
+                query=plan.query, user_id=user_id, date_start=plan.date_start, date_end=plan.date_end
+            )),
+            self.get_explicitly_referenced_notes(content, user_id),
+            self.search_service.get_recent_notes(
+                user_id, settings.RECENT_NOTES_DAYS, settings.RECENT_NOTES_TOKEN_BUDGET
+            ),
+        )
+
+        # An explicit [[link]] wins over everything, so it is never dropped;
+        # recent notes are already in whole, so search should not repeat them.
+        explicit_dicts = [result.model_dump() for result in explicit_results]
+        explicit_ids = {d['id'] for d in explicit_dicts}
+        recent_notes = [n for n in recent_notes if n.id not in explicit_ids]
+        in_prompt_ids = explicit_ids | {n.id for n in recent_notes}
+
+        # A question about a period gets that period's notes whole. Past about a
+        # year the notes stop fitting and the most relevant fragments do better.
+        range_notes: List[SearchResult] = []
+        range_total = 0
+        fragments_budget = settings.RETRIEVED_NOTES_TOKEN_BUDGET
+        if plan.date_start and plan.date_end and \
+                (plan.date_end - plan.date_start).days <= settings.MAX_DATE_RANGE_DAYS:
+            range_notes, range_total = await self.search_service.get_notes_in_range(
+                user_id, plan.date_start, plan.date_end, settings.DATE_RANGE_TOKEN_BUDGET,
+                ranked_ids=[r.id for r in semantic_results],
+            )
+            range_notes = [n for n in range_notes if n.id not in in_prompt_ids]
+            in_prompt_ids |= {n.id for n in range_notes}
+            # Search was limited to the same range, so its fragments mostly
+            # repeat these notes; half the space is plenty for the rest.
+            fragments_budget //= 2
+
+        semantic_dicts = [r.model_dump() for r in semantic_results if r.id not in in_prompt_ids]
+        prioritized_results = self._prioritize_search_results(
+            explicit_dicts + semantic_dicts, token_budget=fragments_budget
+        )
+        context = self._generate_context(prioritized_results, plan.period)
+
+        range_section = ""
+        if range_notes:
+            shown = f"all {len(range_notes)}" if len(range_notes) == range_total \
+                else f"the {len(range_notes)} most relevant of {range_total}"
+            range_section = f"""
+
+NOTES FROM {plan.period or f'{plan.date_start} to {plan.date_end}'} ({shown} notes from this period not already shown above, in full, oldest first; the user is asking about this period, so answer from these and cite them):
+
+{self._format_recent_notes(range_notes)}"""
+
+        # Stable parts first (instructions, who the user is, this month's
+        # notes) so consecutive messages share a long prefix and hit OpenAI's
+        # automatic prompt cache; per-message notes last.
+        system_content = f"""{settings.SYSTEM_PROMPT}
+
+ABOUT THE USER:
+{user_settings.get('personal_info') or '(not provided)'}
+
+MEMORY:
+{user_settings.get('memory') or '(none)'}
+
+TODAY: {date.today().strftime('%A, %B %d, %Y')}
+
+RECENT NOTES (the last {settings.RECENT_NOTES_DAYS} days, in full, oldest first; this is what is on their mind now):
+
+{self._format_recent_notes(recent_notes)}{range_section}
+
+OLDER NOTES RELEVANT TO THIS MESSAGE (found by search; fragments, not whole notes):
+
+{context}"""
+
+        return PromptContext(
+            system_content=system_content,
+            sources=[n.model_dump() for n in range_notes] + prioritized_results,
+            plan=plan,
+            recent_titles=[n.title for n in recent_notes],
+            range_titles=[n.title for n in range_notes],
+            fragment_titles=[r['title'] for r in prioritized_results],
+        )
+
     async def process_message(
         self,
         content: str,
@@ -629,71 +794,12 @@ class ChatService:
                 history_messages = [{"role": m.role, "content": m.content} for m in prior[-20:]]  # ~10 turns
                 logger.info(f"[PROCESS_MESSAGE] Loaded {len(history_messages)} history messages from thread {thread_id}")
 
-            # Parse query for temporal intent
-            parsed_query = self.date_query_parser.parse_query(content)
-            temporal_description = None
-            if parsed_query.has_temporal_intent:
-                logger.info(f"Detected temporal query: {parsed_query.temporal_description} (range: {parsed_query.date_range})")
-                temporal_description = parsed_query.temporal_description
-            query_text = parsed_query.clean_query if parsed_query.has_temporal_intent else content
-
-            async def run_search() -> List[SearchResult]:
-                text = await self._standalone_search_query(query_text, history_messages) if history_messages else query_text
-                return await self.search_service.search(SearchQuery(
-                    query=text,
-                    user_id=user_id,
-                    date_start=parsed_query.date_range.start if parsed_query.date_range else None,
-                    date_end=parsed_query.date_range.end if parsed_query.date_range else None
-                ))
-
-            user_settings, semantic_results, explicit_results, recent_notes = await asyncio.gather(
-                self.settings_service.get_user_settings(user_id),
-                run_search(),
-                self.get_explicitly_referenced_notes(content, user_id),
-                self.search_service.get_recent_notes(
-                    user_id, settings.RECENT_NOTES_DAYS, settings.RECENT_NOTES_TOKEN_BUDGET
-                ),
-            )
-
-            # Recent notes are already in the prompt whole; don't repeat them as
-            # search fragments. An explicit [[link]] still wins, so it is never dropped.
-            explicit_dicts = [result.model_dump() for result in explicit_results]
-            explicit_ids = {d['id'] for d in explicit_dicts}
-            recent_notes = [n for n in recent_notes if n.id not in explicit_ids]
-            in_prompt_ids = explicit_ids | {n.id for n in recent_notes}
-            semantic_dicts = [r.model_dump() for r in semantic_results if r.id not in in_prompt_ids]
-            all_results = explicit_dicts + semantic_dicts
-
-            prioritized_results = self._prioritize_search_results(
-                all_results, token_budget=settings.RETRIEVED_NOTES_TOKEN_BUDGET
-            )
-
-            # Generate context using prioritized results
-            context = self._generate_context(prioritized_results, temporal_description)
+            prompt = await self._build_prompt(content, history_messages, user_id)
+            system_content = prompt.system_content
+            prioritized_results = prompt.sources
 
             if thread_id:
                 await self.add_message(thread_id, "user", content)
-
-            # Stable parts first (instructions, who the user is, this month's
-            # notes) so consecutive messages share a long prefix and hit
-            # OpenAI's automatic prompt cache; per-message search results last.
-            system_content = f"""{settings.SYSTEM_PROMPT}
-
-ABOUT THE USER:
-{user_settings.get('personal_info') or '(not provided)'}
-
-MEMORY:
-{user_settings.get('memory') or '(none)'}
-
-TODAY: {date.today().strftime('%A, %B %d, %Y')}
-
-RECENT NOTES (the last {settings.RECENT_NOTES_DAYS} days, in full, oldest first; this is what is on their mind now):
-
-{self._format_recent_notes(recent_notes)}
-
-OLDER NOTES RELEVANT TO THIS MESSAGE (found by search; fragments, not whole notes):
-
-{context}"""
 
             messages = [
                 {"role": "system", "content": system_content},

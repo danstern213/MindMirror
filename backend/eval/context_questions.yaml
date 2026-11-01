@@ -1,0 +1,88 @@
+# Context eval: does the right material reach the model?
+#
+# retrieval_questions.yaml checks search ranking alone, and most of it was
+# easy (13 of 20 were rank 1 before any work). These check the whole prompt a
+# chat message builds (recent notes, notes from a period, search fragments),
+# on the questions that matter for rediscovery:
+#
+#   theme:  a vague question whose answer is spread across notes from different
+#           years. Passes when at least `need` of the `expect` notes are in the
+#           prompt.
+#   period: "what was I doing in March 2025". Passes when the search plan picks
+#           exactly `range` and the prompt holds the period's notes; reports the
+#           share of that period's notes that made it in.
+#   none:   mentions a date but is not about a period of time; passes when no
+#           date range is applied.
+#
+#   EVAL_USER_ID=<uuid> python3 scripts/eval_context.py            # context only
+#   EVAL_USER_ID=<uuid> python3 scripts/eval_context.py --answers  # + answer quote check
+#
+# Period ranges assume today is 2026-11-01 (the script pins it).
+#
+# Results (2026-11-01, after the date fix, backfill and re-chunk):
+#   old prompt (regex dates, fragments only): passed 11/17, period coverage 24%
+#   search plan + whole notes from a period:  passed 15/17, period coverage 88%,
+#                                             quotes verbatim 126/127, unknown citations 0
+# Both still miss "never enough" and "good father": the answers were good but
+# drew on other notes. One line in a long, many-topic daily note does not
+# resemble a short vague question; searching from several angles may fix it.
+
+- kind: theme
+  question: do I tend to lose my temper when people question my work?
+  expect: ["2022-10-27.md", "2022-02-26.md", "2021 New Year Roundup.md", "2022-04-09.md"]
+  need: 2
+- kind: theme
+  question: when have I caught myself envying or competing with people at work?
+  expect: ["2024-02-08.md", "2020 New Year Roundup.md", "2024-05-16.md", "2025-08-09.md"]
+  need: 2
+- kind: theme
+  question: how has my ego gotten in the way at Adonis?
+  expect: ["2024-05-16.md", "2025-12-07.md", "2026-03-24.md"]
+  need: 2
+- kind: theme
+  question: did I feel ready to be a dad before the baby came?
+  expect: ["2023-04-23.md", "2023-09-19.md", "Am I ready for fatherhood?.md", "Am I ready for fatherhood.md"]
+  need: 2
+- kind: theme
+  question: have I ever felt like I'm just never enough?
+  expect: ["2025-09-29.md"]
+- kind: theme
+  question: what did my first Father's Day feel like?
+  expect: ["2024-06-16.md"]
+- kind: theme
+  question: was it normal that I didn't feel that rush of love for my daughter right away?
+  expect: ["2023-11-03.md"]
+- kind: theme
+  question: how do I know I'm actually a good father?
+  expect: ["2026-02-28.md", "being a good father.md"]
+- kind: theme
+  question: what have I learned about letting go of the self to see clearly?
+  expect: ["Awareness by Anthony De Mello.md", "2020-05-26.md", "Spiritual Enlightenment The Damndest Thing.md", "Searching inhibits us from finding.md", "2021-06-21.md"]
+  need: 2
+- kind: theme
+  question: who do I actually envy?
+  expect: ["2025-08-09.md", "2024-02-08.md"]
+
+- kind: period
+  question: what was I doing in March 2025?
+  range: [2025-03-01, 2025-03-31]
+- kind: period
+  question: what was on my mind last spring?
+  range: [2026-03-01, 2026-05-31]
+- kind: period
+  question: what was I writing about in Q1 2023?
+  range: [2023-01-01, 2023-03-31]
+- kind: period
+  question: how did 2024 go for me?
+  range: [2024-01-01, 2024-12-31]
+- kind: period
+  question: and the month after that?
+  history:
+    - {role: user, content: "what was I doing in March 2025?"}
+    - {role: assistant, content: "In March 2025 you were writing about work at Adonis and time with Samara."}
+  range: [2025-04-01, 2025-04-30]
+
+- kind: none
+  question: what have I written about the 2008 financial crisis?
+- kind: none
+  question: what did I take away from 12 Rules for Life?

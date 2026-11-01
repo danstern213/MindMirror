@@ -248,6 +248,13 @@ class UploadService:
 
             # Extract document date from filename
             extracted_date = self.date_extraction_service.extract_date_from_filename(file.filename)
+            if not extracted_date and file.filename.lower().endswith(('.md', '.txt')):
+                # A topical page has no date in its name, but its export header
+                # says when it was written. Better than none, and far better than
+                # the upload day, which is what a bulk import used to leave behind.
+                extracted_date = self.date_extraction_service.extract_date_from_frontmatter(
+                    content[:500].decode('utf-8', errors='ignore')
+                )
             document_date = None
             date_source = None
             if extracted_date:

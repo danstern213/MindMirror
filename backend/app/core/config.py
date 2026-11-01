@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     RECENT_NOTES_DAYS: int = 30
     RECENT_NOTES_TOKEN_BUDGET: int = 35000
     RETRIEVED_NOTES_TOKEN_BUDGET: int = 30000
+    # A question about a period ("March 2025", "last spring") gets that
+    # period's notes whole, for ranges up to about a year.
+    DATE_RANGE_TOKEN_BUDGET: int = 40000
+    MAX_DATE_RANGE_DAYS: int = 366
     MAX_PROMPT_TOKENS: int = 100000
 
     # Chat Settings

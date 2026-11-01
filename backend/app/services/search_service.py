@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any, Set
+from typing import List, Optional, Dict, Any, Set, Sequence, Tuple
 from datetime import date, timedelta
 from uuid import UUID
 from supabase import Client, create_client
@@ -338,6 +338,56 @@ class SearchService:
             logger.error(f"Error fetching recent notes: {e}")
             return []
 
+        notes = self._whole_notes(files)
+        # Newest first while filling the budget, then back to reading order.
+        notes.sort(key=lambda n: n.document_date or date.min, reverse=True)
+        kept, used = _fill_budget(notes, token_budget)
+        kept.sort(key=lambda n: n.document_date or date.min)
+        logger.info(f"Recent notes: kept {len(kept)} of {len(notes)} from the last {days} days (~{used} tokens)")
+        return kept
+
+    async def get_notes_in_range(
+        self,
+        user_id: UUID,
+        date_start: date,
+        date_end: date,
+        token_budget: int,
+        ranked_ids: Sequence[str] = ()
+    ) -> Tuple[List[SearchResult], int]:
+        """
+        Every note dated within the range, whole and oldest first, plus how
+        many notes the range holds in all.
+
+        For "what was I doing in March 2025" the answer is that month's notes,
+        not the few fragments that happen to resemble "what was I doing". When
+        they do not all fit, the ones search ranked highest (`ranked_ids`) go
+        in first, then the rest newest first.
+        """
+        columns = 'id, title, document_date, created_at, embeddings(text, chunk_index)'
+
+        def fetch():
+            return self.supabase.table('files').select(columns)\
+                .eq('user_id', str(user_id))\
+                .gte('document_date', date_start.isoformat())\
+                .lte('document_date', date_end.isoformat())\
+                .execute().data or []
+
+        try:
+            files = await asyncio.to_thread(fetch)
+        except Exception as e:
+            logger.error(f"Error fetching notes from {date_start} to {date_end}: {e}")
+            return [], 0
+
+        notes = self._whole_notes(files)
+        rank = {str(note_id): i for i, note_id in enumerate(ranked_ids)}
+        notes.sort(key=lambda n: (rank.get(str(n.id), len(rank)), -(n.document_date or date.min).toordinal()))
+        kept, used = _fill_budget(notes, token_budget)
+        kept.sort(key=lambda n: n.document_date or date.min)
+        logger.info(f"Notes {date_start}..{date_end}: kept {len(kept)} of {len(notes)} (~{used} tokens)")
+        return kept, len(notes)
+
+    def _whole_notes(self, files: List[Dict[str, Any]]) -> List[SearchResult]:
+        """Files with their embedded chunks joined back into the full note; blank ones dropped."""
         notes = []
         for file in files:
             chunks = sorted(file.get('embeddings') or [], key=lambda e: e.get('chunk_index') or 0)
@@ -348,19 +398,7 @@ class SearchService:
                 or self._parse_document_date((file.get('created_at') or '')[:10])
             notes.append(SearchResult(id=file['id'], score=1.0, content=content,
                                       title=file['title'], document_date=note_date))
-
-        # Newest first while filling the budget, then back to reading order.
-        notes.sort(key=lambda n: n.document_date or date.min, reverse=True)
-        kept, used = [], 0
-        for note in notes:
-            cost = len(note.content) // 4
-            if used + cost > token_budget:
-                continue
-            kept.append(note)
-            used += cost
-        kept.sort(key=lambda n: n.document_date or date.min)
-        logger.info(f"Recent notes: kept {len(kept)} of {len(notes)} from the last {days} days (~{used} tokens)")
-        return kept
+        return notes
 
     async def search_by_title(self, title: str, user_id: str) -> Optional[SearchResult]:
         """
@@ -398,6 +436,18 @@ class SearchService:
         except Exception as e:
             logger.error(f"Error searching by title: {e}")
             return None
+
+
+def _fill_budget(notes: List[SearchResult], token_budget: int) -> Tuple[List[SearchResult], int]:
+    """Take notes in the given order while they fit; a long one is skipped, not a stop."""
+    kept, used = [], 0
+    for note in notes:
+        cost = len(note.content) // 4
+        if used + cost > token_budget:
+            continue
+        kept.append(note)
+        used += cost
+    return kept, used
 
 
 def stitch_chunks(texts: List[str], max_overlap: int = 600) -> str:

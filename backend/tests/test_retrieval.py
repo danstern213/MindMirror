@@ -1,4 +1,5 @@
 from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -118,23 +119,72 @@ def _chat_service(openai_response=None, openai_error=None):
     return service
 
 
+def _reply(text):
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=text))])
+
+
 @pytest.mark.asyncio
 async def test_follow_up_is_rewritten_into_standalone_query():
-    reply = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="Serena marriage feedback"))])
-    service = _chat_service(openai_response=reply)
+    service = _chat_service(openai_response=_reply('{"query": "Serena marriage feedback", "start": null, "end": null}'))
 
-    query = await service._standalone_search_query("what else did she say?", [{"role": "user", "content": "marriage feedback from Serena"}])
+    plan = await service._plan_search("what else did she say?", [{"role": "user", "content": "marriage feedback from Serena"}])
 
-    assert query == "Serena marriage feedback"
+    assert plan.query == "Serena marriage feedback"
+    assert plan.date_start is None
 
 
 @pytest.mark.asyncio
-async def test_query_rewrite_failure_falls_back_to_raw_message():
+async def test_plan_failure_falls_back_to_the_date_parser():
     service = _chat_service(openai_error=Exception("rate limited"))
 
-    query = await service._standalone_search_query("what else?", [{"role": "user", "content": "x"}])
+    plan = await service._plan_search("what was I doing in March 2025", [])
 
-    assert query == "what else?"
+    assert (plan.date_start, plan.date_end) == (date(2025, 3, 1), date(2025, 3, 31))
+    assert "march" not in plan.query.lower()
+
+
+@pytest.mark.asyncio
+async def test_plan_failure_without_dates_keeps_the_raw_message():
+    service = _chat_service(openai_error=Exception("rate limited"))
+
+    plan = await service._plan_search("what else?", [{"role": "user", "content": "x"}])
+
+    assert plan.query == "what else?"
+
+
+@pytest.mark.asyncio
+async def test_period_the_parser_cannot_read_comes_from_the_model():
+    service = _chat_service(openai_response=_reply(
+        '{"query": "what I was doing", "start": "2026-03-01", "end": "2026-05-31", "period": "spring 2026"}'))
+
+    plan = await service._plan_search("what was I up to last spring?", [], today=date(2026, 11, 1))
+
+    assert (plan.date_start, plan.date_end, plan.period) == (date(2026, 3, 1), date(2026, 5, 31), "spring 2026")
+
+
+@pytest.mark.asyncio
+async def test_plain_first_question_skips_the_planner():
+    service = _chat_service(openai_error=AssertionError("planner should not run"))
+
+    plan = await service._plan_search("how do I handle setbacks?", [])
+
+    assert plan.query == "how do I handle setbacks?"
+    assert plan.date_start is None
+
+
+def test_search_plan_parsing_tolerates_bad_model_output():
+    from app.services.chat_service import _parse_search_plan
+    today = date(2026, 11, 1)
+
+    assert _parse_search_plan("not json", today) is None
+    assert _parse_search_plan('{"query": ""}', today) is None
+    # A garbled date drops the range but keeps the query.
+    plan = _parse_search_plan('{"query": "q", "start": "March", "end": "2025-03-31"}', today)
+    assert plan.query == "q" and plan.date_start is None
+    # Reversed dates are swapped; an open end runs to today.
+    assert _parse_search_plan('{"query": "q", "start": "2025-03-31", "end": "2025-03-01"}', today).date_start == date(2025, 3, 1)
+    assert _parse_search_plan('{"query": "q", "start": "2025-06-01", "end": null}', today).date_end == today
+    assert _parse_search_plan('```json\n{"query": "q"}\n```', today).query == "q"
 
 
 def test_stitch_chunks_removes_the_overlap_between_chunks():
@@ -169,3 +219,95 @@ async def test_recent_notes_keep_newest_within_budget_in_reading_order():
     notes = await SearchService(supabase).get_recent_notes(uuid4(), days=30, token_budget=250, today=date(2026, 10, 31))
 
     assert [n.title for n in notes] == ["mid.md", "new.md"]
+
+
+def _range_supabase(files):
+    supabase = MagicMock()
+    query = supabase.table.return_value.select.return_value.eq.return_value.gte.return_value.lte.return_value
+    query.execute.return_value = SimpleNamespace(data=files)
+    return supabase
+
+
+IDS = {}
+
+
+def _file(day, chars, title):
+    return {"id": IDS.setdefault(title, str(uuid4())), "title": title, "document_date": f"2025-03-{day:02d}",
+            "created_at": "2025-03-31T00:00:00", "embeddings": [{"text": "x" * chars, "chunk_index": 0}]}
+
+
+@pytest.mark.asyncio
+async def test_range_notes_are_whole_and_in_date_order():
+    supabase = _range_supabase([_file(20, 100, "c.md"), _file(2, 100, "a.md"), _file(9, 100, "b.md"), _file(15, 0, "blank.md")])
+
+    notes, total = await SearchService(supabase).get_notes_in_range(
+        uuid4(), date(2025, 3, 1), date(2025, 3, 31), token_budget=10_000)
+
+    assert [n.title for n in notes] == ["a.md", "b.md", "c.md"]
+    assert total == 3  # blank pages do not count
+
+
+@pytest.mark.asyncio
+async def test_range_over_budget_keeps_what_search_ranked_first():
+    supabase = _range_supabase([_file(d, 400, f"{d}.md") for d in (1, 10, 20, 30)])
+
+    # Room for two 400-char notes; search ranked the 10th, then the 1st.
+    notes, total = await SearchService(supabase).get_notes_in_range(
+        uuid4(), date(2025, 3, 1), date(2025, 3, 31), token_budget=200, ranked_ids=[IDS["10.md"], IDS["1.md"]])
+
+    assert [n.title for n in notes] == ["1.md", "10.md"]
+    assert total == 4
+
+
+def test_front_matter_created_date_is_read():
+    from app.services.date_extraction_service import DateExtractionService
+    ex = DateExtractionService()
+
+    found = ex.extract_date_from_frontmatter("---\ncreated: 2022-08-18 08:39:03\nupdated: 2024-01-01\n---\nBezos on Day 1")
+
+    assert found.date == date(2022, 8, 18) and found.source == "frontmatter"
+    assert ex.extract_date_from_frontmatter("no header\ncreated: 2022-08-18") is None
+    assert ex.extract_date_from_frontmatter("---\ncreated: 2022-13-45\n---") is None
+
+
+def test_sync_reuploads_only_notes_edited_after_upload(tmp_path):
+    import os, sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    from sync_new_roam import edited_since
+
+    note = tmp_path / "2026-10-30.md"
+    note.write_text("written later")
+    os.utime(note, (1_790_000_000, 1_790_000_000))  # 2026-09-20 UTC
+
+    assert edited_since(note, "2026-09-01T08:00:00+00:00")
+    assert not edited_since(note, "2026-10-01T08:00:00Z")
+    assert not edited_since(note, "2026-10-01T08:00:00")  # naive timestamps are UTC
+    assert not edited_since(note, None)
+
+
+def test_backfill_matches_both_daily_note_spellings_and_dropped_punctuation():
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    from backfill_missing_notes import name_key, name_keys, note_body
+
+    assert name_key("September 1st, 2021.md") in name_keys("2021-09-01.md")
+    assert name_key("Am I a good husband?.md") in name_keys("Am I a good husband.md")
+    assert note_body("---\ncreated: 2022-08-18\n---\nhello") == "hello"
+
+
+def test_chunking_keeps_the_whole_note_when_paragraph_breaks_come_early():
+    from app.services.embedding_service import EmbeddingService
+    # One early paragraph break, then 4,000 characters of single-newline lines:
+    # the old chunker cut ~250-char chunks here and dropped everything after.
+    text = "First paragraph about Samara.\n\n" + "".join(f"line {i} of the long entry.\n" for i in range(160))
+
+    chunks = EmbeddingService(MagicMock()).chunk_text(text, chunk_size=2000, overlap=300)
+
+    assert "line 159 of the long entry." in chunks[-1]
+    assert all(len(c) >= 900 for c in chunks[:-1])
+    assert from_search_stitch(chunks) == text.strip()
+
+
+def from_search_stitch(chunks):
+    from app.services.search_service import stitch_chunks
+    return stitch_chunks(chunks)
