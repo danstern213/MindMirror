@@ -1,0 +1,5 @@
+# Separate from the backend's requirements on purpose: mcp 2.x needs
+# pydantic>=2.12 and httpx2, which conflict with the backend's pins.
+mcp==2.3.0
+httpx2==2.13.1
+uvicorn==0.54.0

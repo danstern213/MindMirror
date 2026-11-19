@@ -272,3 +272,24 @@ async def count_files(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to count files: {str(e)}"
         ) 
+@router.get("/{file_id}")
+async def get_file(
+    file_id: UUID,
+    current_user_id: UUID = Depends(get_user_id_from_auth),
+    service: UploadService = Depends(get_upload_service)
+) -> dict:
+    """
+    Get one note's metadata and full text as JSON.
+
+    Supports both JWT and API key auth. Declared after /list and /count so
+    those literal paths are matched first.
+    """
+    record, content = await service.get_file_with_content(file_id, current_user_id)
+    return {
+        "id": str(record.id),
+        "title": record.title,
+        "filename": record.filename,
+        "document_date": record.document_date.isoformat() if record.document_date else None,
+        "created_at": record.created_at.isoformat(),
+        "content": content,
+    }
