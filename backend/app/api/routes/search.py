@@ -4,18 +4,20 @@ from uuid import UUID
 
 from ...services.search_service import SearchService
 from ...models.search import SearchQuery, SearchResult
-from ...core.deps import get_user_id_from_supabase, get_search_service
+from ...core.deps import get_user_id_from_supabase, get_user_id_from_auth, get_search_service
 
 router = APIRouter()
 
 @router.post("", response_model=List[SearchResult])
 async def search(
     query: SearchQuery,
-    current_user_id: UUID = Depends(get_user_id_from_supabase),
+    current_user_id: UUID = Depends(get_user_id_from_auth),
     service: SearchService = Depends(get_search_service)
 ) -> List[SearchResult]:
     """
     Perform a comprehensive search across user's documents.
+
+    Supports both JWT and API key auth (the MCP server calls this with a key).
     
     The search combines:
     1. Semantic similarity using embeddings

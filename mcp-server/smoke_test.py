@@ -1,117 +1,77 @@
 """
-Smoke test for the Big Brain MCP server.
-
-Drives the server the way a real MCP client will: handshake, tool discovery and
-a tool call, over BOTH transports, plus a check that the bearer gate actually
-rejects unauthenticated callers.
+Smoke test: initialize -> tools/list -> tools/call against a running server.
 
 Usage:
-    export MCP_BEARER_TOKEN=...
-    python smoke_test.py                                  # defaults to localhost:8000
-    python smoke_test.py http://127.0.0.1:8901
-    python smoke_test.py https://your-mcp.up.railway.app   # after deploying
+    export MCP_TOKEN=...
+    python smoke_test.py https://<your-service>.up.railway.app [--query "text"]
 
-Exits non-zero if any check fails.
+Also checks /health and that /mcp rejects a missing token. Exits non-zero on
+any failure. Prints counts and ids only, never note text.
 """
+import argparse
 import asyncio
-import json
 import os
 import sys
 
 import httpx2
 from mcp import ClientSession
-from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamable_http_client
-
-BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000").rstrip("/")
-TOKEN = os.environ.get("MCP_BEARER_TOKEN", "")
-HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 
 failures: list[str] = []
 
 
 def check(ok: bool, label: str, detail: str = "") -> None:
-    print(f"  {'PASS' if ok else 'FAIL'}  {label}{f' — {detail}' if detail else ''}")
+    print(f"  {'PASS' if ok else 'FAIL'}  {label}{f' - {detail}' if detail else ''}")
     if not ok:
         failures.append(label)
 
 
-async def exercise(session: ClientSession, transport: str) -> None:
-    init = await session.initialize()
-    check(
-        init.server_info.name == "big-brain-notes",
-        f"[{transport}] handshake",
-        f"{init.server_info.name} v{init.server_info.version}, protocol {init.protocol_version}",
-    )
-
-    tools = await session.list_tools()
-    names = [t.name for t in tools.tools]
-    check("list_notes" in names, f"[{transport}] tool discovery", f"tools={names}")
-
-    result = await session.call_tool("list_notes", {"limit": 3})
-    payload = result.structured_content or {}
-    if result.is_error:
-        text = result.content[0].text if result.content else "<no content>"
-        check(False, f"[{transport}] list_notes call", text[:160])
-        return
-    if "error" in payload:
-        # The protocol round-trip worked; the backend call did not.
-        check(False, f"[{transport}] list_notes reached backend", str(payload["error"])[:160])
-        return
-    check(
-        isinstance(payload.get("notes"), list),
-        f"[{transport}] list_notes call",
-        f"returned {payload.get('returned')} of {payload.get('total_in_archive')} notes",
-    )
-    if payload.get("notes"):
-        print(f"         first note: {json.dumps(payload['notes'][0])}")
-
-
-async def main() -> None:
-    if not TOKEN:
-        print("MCP_BEARER_TOKEN is not set — set it to the server's token and re-run.")
-        sys.exit(2)
-
-    print(f"Testing {BASE}\n")
-
-    print("Public + auth gate")
+async def run(base: str, token: str, query: str) -> None:
     async with httpx2.AsyncClient(timeout=30) as hc:
-        r = await hc.get(f"{BASE}/health")
-        check(r.status_code == 200, "/health is public", f"{r.status_code} {r.text[:120]}")
+        r = await hc.get(f"{base}/health")
+        check(r.status_code == 200, "GET /health", str(r.status_code))
+        r = await hc.post(f"{base}/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        check(r.status_code == 401, "POST /mcp without token is rejected", str(r.status_code))
 
-        r = await hc.post(f"{BASE}/mcp", json={}, headers={"Accept": "application/json, text/event-stream"})
-        check(r.status_code == 401, "/mcp rejects a request with no token", f"got {r.status_code}")
-
-        r = await hc.post(
-            f"{BASE}/mcp",
-            json={},
-            headers={"Authorization": "Bearer wrong-token", "Accept": "application/json, text/event-stream"},
-        )
-        check(r.status_code == 401, "/mcp rejects a wrong token", f"got {r.status_code}")
-
-    print("\nStreamable HTTP  (POST /mcp)")
-    try:
-        async with httpx2.AsyncClient(headers=HEADERS, timeout=60) as hc:
-            async with streamable_http_client(f"{BASE}/mcp", http_client=hc) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await exercise(session, "streamable")
-    except Exception as e:
-        check(False, "[streamable] transport", f"{type(e).__name__}: {e}")
-
-    print("\nHTTP + SSE  (GET /sse)")
-    try:
-        async with sse_client(f"{BASE}/sse", headers=HEADERS) as (read, write):
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx2.AsyncClient(headers=headers, timeout=httpx2.Timeout(30, read=60)) as hc:
+        async with streamable_http_client(f"{base}/mcp", http_client=hc) as (read, write, *_):
             async with ClientSession(read, write) as session:
-                await exercise(session, "sse")
-    except Exception as e:
-        check(False, "[sse] transport", f"{type(e).__name__}: {e}")
+                init = await session.initialize()
+                check(True, "initialize", f"{init.server_info.name} {init.server_info.version}, "
+                                          f"protocol {init.protocol_version}")
 
-    print()
-    if failures:
-        print(f"{len(failures)} check(s) failed: {', '.join(failures)}")
-        sys.exit(1)
-    print("All checks passed.")
+                names = sorted(t.name for t in (await session.list_tools()).tools)
+                check(names == ["get_note", "search_notes"], "tools/list", str(names))
+
+                res = await session.call_tool("search_notes", {"query": query, "limit": 3})
+                hits = (res.structured_content or {}).get("results", [])
+                detail = res.content[0].text[:200] if res.is_error and res.content else f"{len(hits)} results"
+                check(not res.is_error, "tools/call search_notes", detail)
+
+                if hits:
+                    res = await session.call_tool("get_note", {"id": hits[0]["id"]})
+                    note = res.structured_content or {}
+                    detail = (res.content[0].text[:200] if res.is_error and res.content
+                              else f"id={note.get('id')} chars={note.get('total_chars')} "
+                                   f"truncated={note.get('truncated')}")
+                    check(not res.is_error, "tools/call get_note", detail)
+
+
+def main() -> None:
+    p = argparse.ArgumentParser()
+    p.add_argument("url", help="Server base URL, e.g. https://x.up.railway.app")
+    p.add_argument("--query", default="what have I been working on lately")
+    args = p.parse_args()
+    token = os.environ.get("MCP_TOKEN", "")
+    if not token:
+        sys.exit("Set MCP_TOKEN first.")
+    base = args.url.rstrip("/")
+    print(f"Smoke testing {base}")
+    asyncio.run(run(base, token, args.query))
+    print("\nALL PASSED" if not failures else f"\nFAILED: {', '.join(failures)}")
+    sys.exit(1 if failures else 0)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

@@ -1,119 +1,61 @@
 # Big Brain MCP server
 
-Exposes the AI Note Copilot API over the Model Context Protocol so an external
-agent can read your notes alongside its own context.
+A remote MCP server that gives an MCP client (Atlas) read-only access to Dan's notes through the Big Brain backend.
 
-This is the **validation spike**: one tool, `list_notes`, wrapping
-`GET /files/list` — the endpoint that already accepts API-key auth on the
-deployed backend. The point is to prove the integration works with your
-third-party agent service *before* investing in the pgvector migration that
-real search needs.
+- **Transport:** Streamable HTTP, stateless, single endpoint `POST /mcp`
+- **Health:** `GET /health` returns `200 {"status":"ok"}` with no auth
+- **Auth:** every other request needs `Authorization: Bearer $MCP_TOKEN`. The token is compared in constant time; anything else gets 401.
+- **Rate limit:** `RATE_LIMIT_PER_MINUTE` requests per minute across all callers (default 60), counted before auth. Over the limit returns 429.
+- **Logging:** only `tool=<name> status=<ok|error|crash> latency_ms=<n>`. Queries, note text, request bodies and tokens are never logged, and access logs are off.
 
-## Why this is a separate service
+## Tools
 
-`mcp` 2.x requires `pydantic>=2.12` and `httpx2`. The backend pins
-`pydantic==2.6.1` and `httpx<0.25` (forced by `supabase==2.3.0`). Mounting MCP
-into the backend would mean upgrading Supabase and Pydantic in production.
-A sibling service keeps both on current dependencies — same pattern as
-`telegram-bridge`.
+| Tool | Upstream call | Returns |
+|---|---|---|
+| `search_notes(query: str 1–1000 chars, limit: int 1–20 = 5)` | `POST {API_URL}/search` with `{query, top_k}` | `{count, results: [{id, title, snippet, score, date}]}`. The snippet is the first 300 characters. |
+| `get_note(id: UUID str)` | `GET {API_URL}/files/{id}` | `{id, title, filename, date, created_at, content, truncated, total_chars}`. Content is cut at 8,000 characters, with `truncated: true` and a `truncation_note` when that happens. |
 
-## Endpoints
+Both descriptions begin "Searches Dan's personal notes. Only call when the user explicitly asks for personal notes or context." There are no write tools.
 
-| Path | Purpose |
-|---|---|
-| `POST /mcp` | Streamable HTTP transport (current standard) |
-| `GET /sse` | HTTP+SSE transport (deprecated, for older clients) |
-| `GET /health` | Public health check; lists any missing config |
+Failures (bad input, upstream 4xx/5xx, timeouts after `UPSTREAM_TIMEOUT_SECONDS`, non-JSON responses) come back as `isError: true` results with a short message. Stack traces and upstream error bodies are never returned.
 
-Both transports serve the same tools, so you can try whichever one your agent
-service speaks. `/health` is the only unauthenticated route.
+**Backend requirement:** both upstream routes must accept API-key auth (`X-API-Key`), and `GET /files/{id}` must exist. Both changes ship in this branch under `backend/`. **Deploy the backend before this service**, or every tool call returns "rejected this server's credentials" or "Note not found".
 
-## Configuration
+## Environment variables
 
-Copy `.env.example` to `.env` for local work, or set these as Railway variables.
+| Var | Required | Notes |
+|---|---|---|
+| `API_URL` | yes | Backend base URL including `/api/v1` |
+| `API_KEY` | yes | Big Brain app key (`ak_…`), sent upstream as `X-API-Key` |
+| `MCP_TOKEN` | yes | Bearer that Atlas must present. `openssl rand -hex 32` |
+| `PUBLIC_HOST` | on Railway | This service's public hostname, no scheme. Without it, the SDK's Host check answers every request with 421 behind Railway's proxy |
+| `UPSTREAM_TIMEOUT_SECONDS` | no | Default `10` |
+| `RATE_LIMIT_PER_MINUTE` | no | Default `60` |
 
-| Variable | Notes |
-|---|---|
-| `CHAT_API_URL` | Backend base URL, default is the Railway production one |
-| `API_KEY` | Big Brain API key (`ak_…`) — the same one the Telegram bridge uses |
-| `USER_ID` | Your Supabase user UUID |
-| `MCP_BEARER_TOKEN` | The secret calling agents must present. `openssl rand -hex 32` |
-| `PUBLIC_HOST` | **Required in production.** This service's hostname, no scheme |
-| `DISABLE_DNS_REBINDING_PROTECTION` | Set to `1` only as an escape hatch (see below) |
+See `.env.example`. Never commit real values (`.env` is gitignored).
 
-### The `PUBLIC_HOST` gotcha
-
-The SDK has a DNS-rebinding guard that validates the `Host` header. Behind
-Railway's proxy that header is your public domain, not `127.0.0.1`, so if you
-leave `PUBLIC_HOST` unset in production the guard has nothing to match and every
-MCP request fails with **421 Invalid Host header**. Set it to
-`your-service.up.railway.app`.
-
-If your agent service sends a `Host` or `Origin` the guard still rejects, set
-`DISABLE_DNS_REBINDING_PROTECTION=1` to turn the guard off without a code
-change. Bearer auth is unaffected either way.
-
-## Run locally
+## Run and test locally
 
 ```bash
-pip install -r requirements.txt
-cp .env.example .env   # fill in API_KEY, USER_ID, MCP_BEARER_TOKEN
-set -a; source .env; set +a
-uvicorn server:app --host 127.0.0.1 --port 8000
+cd mcp-server
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest -v
 ```
 
-Then, in another shell:
+The tests start a fake upstream (`tests/fake_upstream.py`, whose responses mirror `backend/app/models`) and run the real server as a subprocess. They then drive it with the official MCP client. Coverage: auth rejection, rate limiting, both tools, input validation, upstream errors (500, timeout, non-JSON, 404, bad key, unreachable), truncation, and a check that logs leak nothing.
 
-```bash
-MCP_BEARER_TOKEN=<your token> python smoke_test.py http://127.0.0.1:8000
-```
+## Deploy on Railway
 
-`smoke_test.py` runs the handshake, tool discovery and a real tool call over
-**both** transports, and checks that the bearer gate rejects bad tokens. It
-exits non-zero on failure, and works against the deployed URL too.
+1. Merge this branch to `main` so the backend picks up the API-key routes (Railway auto-deploys the backend from `main`).
+2. In the Railway project, create a new service from this repo with **Root Directory** `mcp-server`. It builds with Nixpacks on Python 3.12 and starts with `railway.toml`'s command. The health check is `/health`.
+3. Under **Settings → Networking**, generate a public domain, e.g. `big-brain-mcp.up.railway.app`.
+4. Set the variables `API_URL`, `API_KEY`, `MCP_TOKEN`, and `PUBLIC_HOST=<that domain>`.
+5. Smoke test the deployed URL:
 
-## Deploy to Railway
+   ```bash
+   MCP_TOKEN=... .venv/bin/python smoke_test.py https://<domain> --query "hiking"
+   ```
 
-1. New service in the same project, root directory `mcp-server/`.
-2. Set `API_KEY`, `USER_ID`, `MCP_BEARER_TOKEN`.
-3. Deploy once to get the public domain, then set `PUBLIC_HOST` to that
-   hostname and redeploy.
-4. Verify:
-
-```bash
-curl https://<your-host>/health
-```
-
-5. End-to-end:
-
-```bash
-MCP_BEARER_TOKEN=<your token> python smoke_test.py https://<your-host>
-```
-
-## Point an agent at it
-
-Most hosts want the URL plus a header. For Claude Code:
-
-```bash
-claude mcp add --transport http big-brain https://<your-host>/mcp --header "Authorization: Bearer <your token>"
-```
-
-For another agent service, give it `https://<your-host>/mcp` and the
-`Authorization: Bearer <token>` header. If it only supports the older
-transport, point it at `https://<your-host>/sse` instead.
-
-## What this deliberately does not do yet
-
-`search_notes` and `get_note` are the tools that make the "where else have I
-faced this?" use case work, and they are **not here on purpose**:
-
-- `POST /search` and `GET /files/{id}/content` are still JWT-only on the
-  backend. Both need their dependency changed from
-  `get_user_id_from_supabase` to `get_user_id_from_auth`.
-- Search currently pages every embedding row out of Supabase and computes
-  cosine similarity in pure Python, with no pgvector. One query is tolerable;
-  the 5–10 queries per turn that analogical retrieval needs will time out.
-
-So: confirm the connector works with this spike first. Then do the pgvector
-migration and the `text-embedding-3-large` re-embed in one pass, and add the
-search tools on top.
+   It checks `/health`, checks that `/mcp` rejects a missing token, then runs `initialize → tools/list → tools/call search_notes → tools/call get_note`. It prints only counts and ids and exits non-zero on any failure.
+6. In Atlas, add the server URL `https://<domain>/mcp` with header `Authorization: Bearer <MCP_TOKEN>`.

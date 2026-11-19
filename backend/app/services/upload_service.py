@@ -554,6 +554,27 @@ class UploadService:
                 detail=f"Error replacing file: {str(e)}"
             )
 
+    async def get_file_with_content(self, file_id: UUID, user_id: UUID) -> tuple[FileDB, str]:
+        """Get a file's record and text, or 404 if the user has no such file."""
+        try:
+            rows = self.supabase.table('files')\
+                .select('*')\
+                .eq('id', str(file_id))\
+                .eq('user_id', str(user_id))\
+                .limit(1)\
+                .execute()
+            if not rows.data:
+                raise HTTPException(status_code=404, detail="File not found")
+            record = FileDB(**rows.data[0])
+            content = self.supabase.storage.from_('documents')\
+                .download(record.storage_path)
+            return record, content.decode('utf-8')
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error fetching file {file_id}: {e}")
+            raise HTTPException(status_code=500, detail="Error fetching file")
+
     async def get_file_content(self, file_id: UUID, user_id: UUID) -> str:
         """Get the content of a file."""
         try:
